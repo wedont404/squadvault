@@ -1,0 +1,16 @@
+<!-- Supabase -> Authentication -> Email Templates -> "Confirm signup".
+     Subject:  Confirm your SquadVault account
+     The link uses token_hash, so it works in ANY browser or phone app (not only the one you signed up in). -->
+<div style="background:#0b0f17;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">
+  <div style="max-width:480px;margin:0 auto;background:#121826;border:1px solid #243049;border-radius:16px;padding:28px;color:#e8edf7">
+    <p style="margin:0 0 6px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#b7ff45">SquadVault</p>
+    <h1 style="margin:0 0 12px;font-size:22px;color:#ffffff">Confirm your email</h1>
+    <p style="margin:0 0 20px;line-height:1.55;color:#aab4c8">Welcome! Tap the button to confirm your email and start saving with your squad.</p>
+    <p style="margin:0 0 24px"><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=signup"
+       style="display:inline-block;background:#b7ff45;color:#0b0f17;font-weight:700;text-decoration:none;padding:12px 22px;border-radius:12px">Confirm my email</a></p>
+    <p style="margin:0 0 6px;font-size:13px;color:#7d889f">If the button doesn't work, copy this link into your browser:</p>
+    <p style="margin:0 0 20px;font-size:12px;color:#7d889f;word-break:break-all">{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=signup</p>
+    <p style="margin:0;font-size:12px;color:#7d889f">Didn't create an account? You can ignore this email. SquadVault will never ask for your Mobile Money PIN.</p>
+  </div>
+  <p style="text-align:center;margin:16px 0 0;font-size:12px;color:#7d889f">This website was happily made by Tresor</p>
+</div>

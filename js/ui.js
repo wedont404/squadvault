@@ -272,3 +272,9 @@ export function formMessage(form, type, text) {
 }
 export const formMsgSlot = () => html`<div data-msg></div>`;
 export const formData = (form) => Object.fromEntries(new FormData(form).entries());
+
+/** Footer shown on every screen: Terms link and the credit line. */
+export const siteFooter = () => html`<footer class="site-foot">
+  <button class="link-btn" type="button" data-terms>Terms &amp; Conditions</button>
+  <p>This website was happily made by Tresor</p>
+</footer>`;

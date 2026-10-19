@@ -2,7 +2,7 @@
 // show pending / verified / failed states, and list contribution history.
 // The browser can NEVER mark anything paid: status only changes server-side after provider verification.
 import { state, activeGroup } from "./state.js";
-import { fetchEvents, fetchEventFinancials, fetchContributions } from "./data.js";
+import { fetchEvents, fetchEventFinancials, fetchContributions, fetchContributionStatus } from "./data.js";
 import { invokeFunction } from "./supabase.js";
 import { navigate, refresh } from "./router.js";
 import { config } from "./config.js";
@@ -98,10 +98,17 @@ export async function renderContributions({ outlet, query, isCurrent }) {
         clearFieldErrors(panel);
         const amount = amountNow();
         if (!amount) { setFieldError(panel, "amount", `Enter between ${formatNumber(config.limits.minContribution)} and ${formatNumber(config.limits.maxContribution)} RWF.`); $("#f-amount", view)?.focus(); return; }
-        if (!(await submitClaim(claim, cur, amount))) return;
-        mount(panel, html`<div class="stack" style="text-align:center;justify-items:center"><div class="empty" style="border:0"><div class="ico">${icon("clock")}</div><h3>Sent to your group leader</h3>
-          <p>${formatRWF(amount)} for ${cur.name}. It counts toward the target as soon as the leader confirms it. You'll see it as Verified in your history.</p></div>
-          <button class="btn primary" type="button" data-again>Contribute again</button></div>`);
+        const txnGiven = Boolean(String(new FormData(claim).get("txn") ?? "").trim());
+        const newId = await submitClaim(claim, cur, amount);
+        if (!newId) return;
+        const verified = (await fetchContributionStatus(newId).catch(() => null)) === "paid";
+        mount(panel, verified
+          ? html`<div class="stack" style="text-align:center;justify-items:center"><div class="empty" style="border:0"><div class="ico">${icon("check")}</div><h3>Payment verified</h3>
+            <p>${formatRWF(amount)} for ${cur.name} matched the leader's MoMo message and now counts toward the target. Thank you!</p></div>
+            <button class="btn primary" type="button" data-again>Contribute again</button></div>`
+          : html`<div class="stack" style="text-align:center;justify-items:center"><div class="empty" style="border:0"><div class="ico">${icon("clock")}</div><h3>Sent to your group leader</h3>
+            <p>${formatRWF(amount)} for ${cur.name}. It counts toward the target as soon as the leader confirms it${txnGiven ? " or the matching MoMo message arrives" : ""}. You'll see it as Verified in your history.</p></div>
+            <button class="btn primary" type="button" data-again>Contribute again</button></div>`);
         refreshHistory(); refreshSummary();
       });
       on(view, "input", "#f-phone", () => {

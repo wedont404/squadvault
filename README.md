@@ -192,3 +192,28 @@ This is the default way to collect. `config.onlinePayments` is `false`, so the I
 7. Admins can **Add member** by the email of an existing account (Group page), or remove a member with the bin button. Invitation codes still work for people without an account.
 
 Unverified: the USSD shortcut formats. `*182*1*1*<number>*<amount>#` is the format supplied by the project owner; the merchant-code format `*182*8*1*<code>*<amount>#` and Airtel's `*500#` menu are not confirmed. Test them with a small amount on a real phone. If a shortcut fails, the page tells the member to dial `*182#` and enter the number manually.
+
+
+## Automatic payment checking (optional, Android)
+
+No app can read MTN/Airtel records directly without a payment-provider API. SquadVault instead reads the leader's own
+"you have received ... RWF" MoMo messages.
+
+1. Run `supabase/SQUADVAULT_UPDATE_008.sql` once (included in `SQUADVAULT_ALL_IN_ONE.sql` for new setups).
+2. Group page -> **Payment checking** -> **Turn on**. Copy the four values shown (shown once).
+3. On the leader's Android phone, install an SMS-forwarder app that can POST JSON with custom headers and forward only the mobile money provider's messages.
+4. Paste a real message into the **Test a sample MoMo message** box to confirm it is read correctly (amount, transaction ID).
+
+Rules: a claim is confirmed automatically only when the **transaction ID and the amount both match** one unused message. A claim
+without a transaction ID is never auto-confirmed. The leader sees a suggested match (amount and time) and confirms with one tap.
+Each message can confirm one claim only. Only amount, transaction ID and the sender's name are stored, never the SMS text.
+Unverified: the exact wording of MTN/Airtel messages. That is what the test box is for. If a real message is not recognised, the parser in
+`private.parse_momo_sms` (008 SQL) needs adjusting.
+
+Limit: a transaction ID is not secret. Someone who learns another member's ID and amount could claim it first. Auto-verified payments are labelled
+"Auto-verified from MoMo SMS", and the leader can mark one as refunded if it is disputed.
+
+## Emails, reset links, terms
+
+See `supabase/email-templates/README.md` for branded emails, custom SMTP and the reset-link templates. The Terms & Conditions are in `js/terms.js`
+(a plain-language template: have it reviewed before relying on it); set `contactEmail` in `js/config.js` to show a contact line.

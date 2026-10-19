@@ -82,6 +82,10 @@ const MESSAGES = {
   no_such_user: "No SquadVault account uses that email yet. Share an invitation code instead.",
   already_member: "That person is already in this group.",
   group_full: "This group has reached its member limit.",
+  receipt_used: "That MoMo message has already been used for another payment.",
+  amount_mismatch: "The amount in that MoMo message is different from the claim, so it can't be used to confirm it.",
+  invalid_token: "That secret isn't valid.",
+  slow_down: "Too many messages at once. Try again in a minute.",
   invalid_code: "That invitation code isn't valid. It may be wrong, expired, revoked or used up.",
 };
 

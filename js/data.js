@@ -163,3 +163,15 @@ export async function fetchEventProgress(eventId) {
     avatar_path: profiles.get(r.user_id)?.avatar_path ?? null,
   }));
 }
+
+/** Leader only. Suggested MoMo-SMS matches for the waiting claims of an event (empty on any error). */
+export async function fetchClaimHints(eventId) {
+  try { return (await rpc("claim_match_hints", { p_event_id: eventId })) ?? []; } catch { return []; }
+}
+export async function fetchCollectorActive(groupId) {
+  try { return Boolean((await rpc("collector_status", { p_group_id: groupId }))?.active); } catch { return false; }
+}
+export async function fetchContributionStatus(id) {
+  const row = must(await supabase.from("contributions").select("status").eq("id", id).maybeSingle());
+  return row?.status ?? null;
+}

@@ -1,6 +1,6 @@
 // Events: list, create, edit, detail with verified-only progress, contributors, expenses, history.
 import { activeGroup, groupById, isManagerRole } from "./state.js";
-import { fetchEvents, fetchEvent, fetchFinancials, fetchEventFinancials, fetchContributions, fetchExpenses, fetchEventProgress, buildActivity, finOrEmpty } from "./data.js";
+import { fetchEvents, fetchEvent, fetchFinancials, fetchEventFinancials, fetchContributions, fetchExpenses, fetchEventProgress, fetchClaimHints, fetchCollectorActive, buildActivity, finOrEmpty } from "./data.js";
 import { rpc } from "./supabase.js";
 import { navigate } from "./router.js";
 import { html, formatRWF, formatDate, parseRWF, percent, daysUntil } from "./utils.js";
@@ -13,7 +13,7 @@ import { expenseRow, activityRows, openReceipt } from "./components.js";
 import { openExpenseDialog } from "./expenses.js";
 import {
   payFields, readPayFields, savePayDetails, hasPayDetails, accountCard, bindCopyAndDial, progressSection, reminderText,
-  claimsQueue, reviewClaim, openRecordDialog,
+  claimsQueue, reviewClaim, confirmWithReceipt, openRecordDialog,
 } from "./momo.js";
 import { copyText } from "./utils.js";
 
@@ -128,14 +128,16 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
         const event = await fetchEvent(eventId);
         if (!event) return { event: null };
         const mgr = isManagerRole(groupById(event.group_id)?.role);
-        const [fin, contributions, expenses, progress, claims] = await Promise.all([
+        const [fin, contributions, expenses, progress, claims, hints, collectorActive] = await Promise.all([
           fetchEventFinancials(eventId), fetchContributions({ eventId, limit: 200 }), fetchExpenses({ eventId, limit: 100 }),
           fetchEventProgress(eventId),
           mgr ? fetchContributions({ eventId, status: "pending", limit: 100 }) : Promise.resolve([]),
+          mgr ? fetchClaimHints(eventId) : Promise.resolve([]),
+          mgr ? fetchCollectorActive(event.group_id) : Promise.resolve(false),
         ]);
-        return { event, fin, contributions, expenses, progress, claims: claims.filter((c) => c.provider === "manual") };
+        return { event, fin, contributions, expenses, progress, claims: claims.filter((c) => c.provider === "manual"), hints, collectorActive };
       },
-      render: ({ event, fin, contributions, expenses, progress, claims }) => {
+      render: ({ event, fin, contributions, expenses, progress, claims, hints, collectorActive }) => {
         if (!event) {
           mount(view, emptyState({ iconName: "lock", title: "Event not found", text: "It may not exist, or it belongs to a group you're not in.", actions: html`<a class="btn" href="#/events">Back to events</a>` }));
           return;
@@ -186,7 +188,7 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
                 ? emptyState({ iconName: "wallet", title: "Add your MoMo number or code", text: "Members need somewhere to send their contribution.", actions: html`<button class="btn primary" type="button" data-edit>${icon("edit")} Add payment details</button>` })
                 : html`<p class="muted">The leader hasn't added a MoMo number or code yet.</p>`}</div>` : ""}
 
-          ${manager ? claimsQueue(claims) : ""}
+          ${manager ? claimsQueue(claims, hints, collectorActive) : ""}
 
           <div class="grid cols-2 section" style="align-items:start">
             <div>${progressSection(progress, event, { manager })}</div>
@@ -202,6 +204,7 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
 
         on(view, "click", "[data-receipt]", (_, b) => openReceipt(b.dataset.receipt));
         bindCopyAndDial(view);
+        on(view, "click", "[data-confirm-receipt]", async (_, b) => { if (await confirmWithReceipt(b.dataset.id, b.dataset.receipt, b.dataset.strength)) draw(); });
         on(view, "click", "[data-review]", async (_, b) => { if (await reviewClaim(b.dataset.id, b.dataset.review)) draw(); });
         on(view, "click", "[data-record]", (_, b) => openRecordDialog({ event, rows: progress, userId: b.dataset.record, owed: Number(b.dataset.owed) || 0, onDone: () => draw() }));
         on(view, "click", "[data-record-any]", () => openRecordDialog({ event, rows: progress, onDone: () => draw() }));

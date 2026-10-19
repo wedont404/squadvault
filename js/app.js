@@ -1,11 +1,11 @@
 // SquadVault entry point: boot, session handling, app shell (sidebar / mobile nav), routes.
 import { isConfigured } from "./config.js";
 import { initSupabase, friendlyError, supabase } from "./supabase.js";
-import { initAuth, renderAuth, signOut } from "./auth.js";
+import { initAuth, renderAuth, signOut, peekAuthLink, clearAuthLink, verifyEmailLink, LINK_NOTICES } from "./auth.js";
 import { defineRoute, startRouter, stopRouter, refresh } from "./router.js";
 import { state, setState, subscribe, chooseActiveGroup, setActiveGroup, resetState } from "./state.js";
 import { fetchProfile, fetchGroups } from "./data.js";
-import { $, $$, mount, on, icon, avatar, toast } from "./ui.js";
+import { $, $$, mount, on, icon, avatar, toast, siteFooter } from "./ui.js";
 import { html, str } from "./utils.js";
 
 const app = document.getElementById("app");
@@ -22,6 +22,7 @@ function bindAppEvents() {
   on(app, "click", "[data-signout]", () => signOut());
   on(app, "click", "[data-more]", openMoreSheet);
   on(app, "click", "[data-reload]", () => location.reload());
+  on(app, "click", "[data-terms]", async () => (await import("./terms.js")).openTerms());
   on(app, "click", "[data-retry-boot]", () => { if (pendingSession) handleSession(pendingSession); });
 }
 
@@ -51,7 +52,10 @@ async function boot() {
 
   defineRoutes();
 
-  const session = await initAuth({
+  const link = peekAuthLink(); // what an email link left in the address bar (read now, cleared after init)
+  if (link.tokenHash && link.type === "recovery") inRecovery = true;
+
+  let session = await initAuth({
     onSession: handleSession,
     onRecovery: () => { inRecovery = true; teardownShell(); renderAuth(app, { mode: "recovery" }); },
     onSignedOut: ({ expired }) => {
@@ -69,8 +73,32 @@ async function boot() {
     if (data.session) handleSession(data.session); else renderAuth(app, { mode: "signin" });
   });
 
+  // Email links: confirm-email and reset-password
+  let linkNotice = null;
+  let linkMode = "signin";
+  if (link.tokenHash) {
+    const r = await verifyEmailLink(link);
+    if (r.ok) {
+      session = (await supabase.auth.getSession()).data.session;
+      if (link.type === "recovery") { inRecovery = true; renderAuth(app, { mode: "recovery" }); clearAuthLink(); return; }
+      toast("Email confirmed. Welcome to SquadVault!", "success");
+    } else {
+      inRecovery = false;
+      linkNotice = LINK_NOTICES.expired;
+      linkMode = link.type === "recovery" ? "forgot" : "signin";
+    }
+  } else if (link.error) {
+    linkNotice = LINK_NOTICES.expired;
+    linkMode = "forgot";
+  } else if (link.code && !session && !inRecovery) {
+    linkNotice = LINK_NOTICES.samebrowser; // the old-style link was opened where the reset was not requested
+    linkMode = "forgot";
+  }
+  clearAuthLink();
+
+  if (inRecovery) return; // the recovery form is already on screen
   if (session) handleSession(session);
-  else if (!inRecovery) renderAuth(app, { mode: "signin" });
+  else renderAuth(app, { mode: linkMode, notice: linkNotice });
 }
 
 function renderSetup() {
@@ -158,7 +186,7 @@ function renderShell() {
         <div class="brand"><img src="assets/logo.svg" alt="SquadVault"></div>
         <div data-slot="switch-mobile">${groupSwitcher("gs-m")}</div>
       </header>
-      <main class="main" id="main" tabindex="-1"><div id="outlet" class="view"></div></main>
+      <main class="main" id="main" tabindex="-1"><div id="outlet" class="view"></div>${siteFooter()}</main>
     </div>
     <nav class="bottom-nav" aria-label="Mobile navigation">
       ${NAV.filter(([k]) => BOTTOM.includes(k)).map(([k, label, ic]) => html`<a href="#/${k}" data-nav="${k}">${icon(ic)}<span>${label.replace("My ", "")}</span></a>`)}

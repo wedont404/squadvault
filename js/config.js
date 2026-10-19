@@ -17,6 +17,8 @@ export const config = Object.freeze({
   currency: "RWF",
   // Set true only after you deploy the IntaSend Edge Functions (README). Off = leader-managed MoMo number/code.
   onlinePayments: false,
+  // Optional public contact shown in the Terms. Leave empty to hide it.
+  contactEmail: "",
   limits: Object.freeze({
     minContribution: 100,
     maxContribution: 5_000_000,

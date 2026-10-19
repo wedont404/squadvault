@@ -2,7 +2,8 @@
 // Identity always comes from the verified Supabase session; no user id is ever sent by the browser.
 import { supabase, friendlyError } from "./supabase.js";
 import { html, isEmail, passwordProblem } from "./utils.js";
-import { icon, field, mount, on, setBusy, setFieldError, clearFieldErrors, formMessage, formMsgSlot, formData, $ } from "./ui.js";
+import { icon, field, mount, on, setBusy, setFieldError, clearFieldErrors, formMessage, formMsgSlot, formData, siteFooter, $ } from "./ui.js";
+import { TERMS_VERSION } from "./terms.js";
 
 const redirectUrl = () => `${location.origin}${location.pathname}`;
 
@@ -19,9 +20,10 @@ export async function initAuth(handlers) {
   window.addEventListener("sv:manual-signout", () => { manualSignOut = true; });
 
   supabase.auth.onAuthStateChange((event, session) => {
+    // The recovery flag is set synchronously, so the SIGNED_IN that arrives with it can never open the app.
+    if (event === "PASSWORD_RECOVERY") { handlers.onRecovery?.(session); return; }
     // Never call supabase APIs synchronously in here (documented deadlock); defer a tick.
     setTimeout(() => {
-      if (event === "PASSWORD_RECOVERY") return handlers.onRecovery?.(session);
       if (event === "SIGNED_OUT") {
         const expired = hadSession && !manualSignOut;
         hadSession = false;
@@ -41,6 +43,41 @@ export async function initAuth(handlers) {
   if (error) console.error("getSession failed", error);
   return data?.session ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Email links (confirm email, reset password)
+//   New style  : <site>/?token_hash=...&type=recovery|signup   -> verifyOtp, works in ANY browser or phone app
+//   Older style: <site>/?code=...                              -> only works in the browser that asked for it
+// ---------------------------------------------------------------------------
+const LINK_TYPES = new Set(["signup", "recovery", "invite", "magiclink", "email", "email_change"]);
+
+/** Reads (does not clear) what an email link left in the address bar. */
+export function peekAuthLink() {
+  const q = new URLSearchParams(location.search);
+  const h = new URLSearchParams(/error/.test(location.hash) ? location.hash.replace(/^#\/?/, "") : "");
+  const type = q.get("type");
+  return {
+    tokenHash: q.get("token_hash") && LINK_TYPES.has(type) ? q.get("token_hash") : null,
+    type,
+    code: q.get("code"),
+    error: q.get("error_description") || h.get("error_description") || (q.get("error") ? "error" : null),
+  };
+}
+
+export function clearAuthLink() {
+  if (location.search || /error/.test(location.hash)) history.replaceState(null, "", location.pathname);
+}
+
+/** Exchanges the one-time token from an email link for a session. */
+export async function verifyEmailLink({ tokenHash, type }) {
+  const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+  return { ok: !error, error };
+}
+
+export const LINK_NOTICES = {
+  expired: { type: "warn", text: "That link has expired or was already used. Request a new one below." },
+  samebrowser: { type: "warn", text: "That link couldn't be opened here. Open it in the same browser where you asked for it, or request a new link below." },
+};
 
 export async function signOut({ everywhere = false } = {}) {
   window.dispatchEvent(new Event("sv:manual-signout"));
@@ -67,7 +104,7 @@ function shell(card) {
       </div>
       <ul>${heroPoints.map(([i, t]) => html`<li>${icon(i)}<span>${t}</span></li>`)}</ul>
     </section>
-    <main class="auth-panel" id="main">${card}</main>
+    <main class="auth-panel" id="main"><div style="display:grid;justify-items:center;width:100%">${card}${siteFooter()}</div></main>
   </div>`;
 }
 
@@ -110,6 +147,7 @@ function renderSignUp(root) {
       ${field({ name: "display_name", label: "Display name", autocomplete: "nickname", placeholder: "How your squad sees you", attrs: 'maxlength="60"' })}
       ${field({ name: "email", label: "Email", type: "email", autocomplete: "email", placeholder: "you@example.com" })}
       ${field({ name: "password", label: "Password", type: "password", autocomplete: "new-password", help: "At least 8 characters, with a letter and a number." })}
+      <div class="field" data-field="agree"><label class="check"><input type="checkbox" id="f-agree" name="agree" value="yes" aria-describedby="err-agree"><span>I have read and agree to the <button class="link-btn" type="button" data-terms>Terms &amp; Conditions</button>.</span></label><div class="error" id="err-agree" role="alert"></div></div>
       ${formMsgSlot()}
       <button class="btn primary block" type="submit">Create account</button>
     </form>
@@ -118,10 +156,11 @@ function renderSignUp(root) {
   $("#f-display_name", root)?.focus();
 }
 
-function renderForgot(root) {
+function renderForgot(root, notice) {
   mount(root, shell(html`<div class="auth-card">
     <div><p class="eyebrow">Account recovery</p><h1>Reset your password</h1>
       <p class="muted" style="margin-top:8px">We'll email you a secure link to choose a new password.</p></div>
+    ${noticeBox(notice)}
     <form class="form" novalidate data-form="forgot">
       ${field({ name: "email", label: "Email", type: "email", autocomplete: "email" })}
       ${formMsgSlot()}
@@ -173,11 +212,12 @@ function wire(root) {
         if (!isEmail(v.email)) return bad("email", "Enter a valid email address.");
         const pw = passwordProblem(v.password);
         if (pw) return bad("password", pw);
+        if (v.agree !== "yes") return bad("agree", "Please accept the Terms & Conditions to continue.");
         setBusy(btn, true, "Creating account…");
         const { data, error } = await supabase.auth.signUp({
           email: v.email.trim(),
           password: v.password,
-          options: { data: { display_name: name }, emailRedirectTo: redirectUrl() },
+          options: { data: { display_name: name, terms_version: TERMS_VERSION, terms_accepted_at: new Date().toISOString() }, emailRedirectTo: redirectUrl() },
         });
         if (error) throw error;
         if (!data.session) {

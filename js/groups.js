@@ -132,7 +132,8 @@ export async function renderGroupDetail({ outlet, params, isCurrent }) {
           <div class="section"><div class="section-head"><h2>Members</h2>${admin ? html`<button class="btn sm primary" type="button" data-add-member>${icon("plus")} Add member</button>` : ""}</div>
             <div class="card flush"><div class="list">${members.map((m) => memberRow(m, { admin, me: state.user.id }))}</div></div></div>
 
-          ${manager ? html`<div class="section"><div class="section-head"><h2>Invitations</h2></div><div data-invites></div></div>` : ""}
+          ${manager ? html`<div class="section"><div class="section-head"><h2>Invitations</h2></div><div data-invites></div></div>
+            <div class="section"><div class="section-head"><h2>Payment checking</h2></div><div data-autocheck></div></div>` : ""}
 
           <div class="grid cols-2 section" style="align-items:start">
             <div><div class="section-head"><h2>Recent contributions</h2></div>
@@ -145,7 +146,10 @@ export async function renderGroupDetail({ outlet, params, isCurrent }) {
             ${(() => { const a = buildActivity(contributions, expenses, 10); return a.length ? html`<div class="card flush"><div class="list">${activityRows(a)}</div></div>` : html`<p class="muted">No activity yet.</p>`; })()}
           </div>`);
 
-        if (manager) mountInvitationPanel($("[data-invites]", view), groupId);
+        if (manager) {
+          mountInvitationPanel($("[data-invites]", view), groupId);
+          import("./autocheck.js").then((m) => m.mountAutoCheckPanel($("[data-autocheck]", view), group));
+        }
 
         on(view, "click", "[data-make-current]", () => { setActiveGroup(groupId); toast(`Now viewing ${group.name}.`, "success"); draw(); });
         on(view, "click", "[data-add-member]", () => openAddMemberDialog(group, () => draw()));

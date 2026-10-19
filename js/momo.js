@@ -111,7 +111,7 @@ export async function dialWithNotice(ussd) {
 export function claimForm() {
   return html`<form class="form" data-claim novalidate>
     <div><h4 style="margin:0">After you have paid</h4><p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Tell the group leader. It counts once they confirm it.</p></div>
-    ${field({ name: "txn", label: "MoMo transaction ID (optional)", placeholder: "From the confirmation SMS", required: false, attrs: 'maxlength="20" autocapitalize="characters"', help: "Helps the leader find your payment quickly." })}
+    ${field({ name: "txn", label: "MoMo transaction ID (optional)", placeholder: "From the confirmation SMS", required: false, attrs: 'maxlength="20" autocapitalize="characters"', help: "Optional. If you add it and the leader has automatic checking on, your payment is verified straight away. Without it, the leader confirms by hand." })}
     ${formMsgSlot()}
     <button class="btn primary block" type="submit">${icon("check")} I've paid</button>
   </form>`;
@@ -120,16 +120,15 @@ export function claimForm() {
 export async function submitClaim(form, ev, amount) {
   clearFieldErrors(form);
   const txn = String(formData(form).txn ?? "").trim();
-  if (txn && !/^[A-Za-z0-9]{6,20}$/.test(txn)) { setFieldError(form, "txn", "6 to 20 letters or numbers, or leave empty."); return false; }
+  if (txn && !/^[A-Za-z0-9]{6,20}$/.test(txn)) { setFieldError(form, "txn", "6 to 20 letters or numbers, or leave empty."); return null; }
   const btn = $('button[type="submit"]', form);
   setBusy(btn, true, "Sending…");
   try {
-    await rpc("submit_payment_claim", { p_event_id: ev.id, p_amount: amount, p_txn_ref: txn || null });
-    return true;
+    return await rpc("submit_payment_claim", { p_event_id: ev.id, p_amount: amount, p_txn_ref: txn || null });
   } catch (err) {
     formMessage(form, "error", err.message);
     setBusy(btn, false);
-    return false;
+    return null;
   }
 }
 
@@ -194,16 +193,50 @@ export function reminderText(rows, ev, groupName) {
 // ---------------------------------------------------------------------------
 // Leader: confirm / reject claims, record a payment, add a member
 // ---------------------------------------------------------------------------
-export function claimsQueue(claims) {
+export function claimsQueue(claims, hints = [], collectorActive = false) {
   if (!claims.length) return "";
+  const by = new Map();
+  for (const h of hints) by.set(h.contribution_id, [...(by.get(h.contribution_id) ?? []), h]);
+
+  const check = (c) => {
+    const best = (by.get(c.id) ?? [])[0];
+    if (best) {
+      const amt = Number(best.receipt_amount);
+      const who = best.payer_hint ? ` from ${best.payer_hint}` : "";
+      if (best.strength === "id" && amt === c.amount) {
+        return html`<div class="form-msg ok" style="margin-top:6px">${icon("check")} Matching MoMo message found: ${formatRWF(amt)}${who} · ID ${best.txn_id}</div>`;
+      }
+      if (best.strength === "id") {
+        return html`<div class="form-msg error" style="margin-top:6px">${icon("alert")} A MoMo message with this ID says ${formatRWF(amt)}, not ${formatRWF(c.amount)}. Don't confirm until you've checked.</div>`;
+      }
+      return html`<div class="form-msg info" style="margin-top:6px">Possible match: ${formatRWF(amt)}${who} · ${timeAgo(best.received_at)}. Confirm only if it is this person.</div>`;
+    }
+    return collectorActive
+      ? html`<div class="form-msg warn" style="margin-top:6px">${icon("alert")} No matching MoMo message has arrived yet. Don't confirm until it does.</div>`
+      : "";
+  };
+  const canUse = (c) => { const b = (by.get(c.id) ?? [])[0]; return b && Number(b.receipt_amount) === c.amount ? b : null; };
+
   return html`<div class="section"><div class="section-head"><h2>Waiting for your confirmation</h2></div>
-    <div class="card flush"><div class="list">${claims.map((c) => html`<div class="list-item">${avatar(c.name, c.avatar_path)}
+    <div class="card flush"><div class="list">${claims.map((c) => html`<div class="list-item" style="flex-wrap:wrap">${avatar(c.name, c.avatar_path)}
       <div class="grow"><div class="title">${c.name} · ${formatRWF(c.amount)}</div>
-        <div class="sub">${methodLabel(c.payment_method)} · ${timeAgo(c.created_at)}${c.provider_ref ? ` · ID ${c.provider_ref}` : " · no transaction ID"}</div></div>
-      <div class="acts"><button class="btn sm primary" type="button" data-review="paid" data-id="${c.id}">${icon("check")} Received</button>
+        <div class="sub">${methodLabel(c.payment_method)} · ${timeAgo(c.created_at)}${c.provider_ref ? ` · ID ${c.provider_ref}` : " · no transaction ID"}</div>${check(c)}</div>
+      <div class="acts">${canUse(c) ? html`<button class="btn sm primary" type="button" data-confirm-receipt data-id="${c.id}" data-receipt="${canUse(c).receipt_id}" data-strength="${canUse(c).strength}">${icon("check")} Confirm with this message</button>` : ""}
+        <button class="btn sm ${canUse(c) ? "" : "primary"}" type="button" data-review="paid" data-id="${c.id}">${icon("check")} Received</button>
         <button class="btn sm danger" type="button" data-review="failed" data-id="${c.id}">${icon("x")} Not received</button></div>
     </div>`)}</div></div>
-    <p class="faint" style="font-size:var(--fs-xs);margin-top:8px">Check your MoMo messages before confirming. Only confirmed payments count toward the target.</p></div>`;
+    <p class="faint" style="font-size:var(--fs-xs);margin-top:8px">Check your MoMo messages before confirming. Only confirmed payments count toward the target.${collectorActive ? "" : " Turn on automatic checking in your group page to have claims confirmed from your MoMo messages."}</p></div>`;
+}
+
+export async function confirmWithReceipt(claimId, receiptId, strength) {
+  const ok = await confirmDialog({
+    title: "Confirm with this MoMo message?",
+    message: strength === "id" ? "The transaction ID and amount match your MoMo message. The payment will count toward the event total." : "Only the amount and time match, not a transaction ID. Confirm only if you know this message is from this member.",
+    confirmLabel: "Confirm payment",
+  });
+  if (!ok) return false;
+  try { await rpc("confirm_with_receipt", { p_contribution_id: claimId, p_receipt_id: receiptId }); toast("Payment confirmed.", "success"); return true; }
+  catch (err) { toastError(err); return false; }
 }
 
 export async function reviewClaim(id, decision) {

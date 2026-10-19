@@ -61,3 +61,13 @@ drop function if exists public.review_contribution(uuid, text, text);
 drop function if exists public.record_manual_contribution(uuid, uuid, bigint, text);
 drop function if exists public.event_member_progress(uuid);
 drop function if exists public.add_member_by_email(uuid, text);
+
+-- 008_sms_verification.sql (the two tables hold records, so they are kept; functions are removed)
+drop function if exists public.create_collector_token(uuid);
+drop function if exists public.revoke_collector_token(uuid);
+drop function if exists public.collector_status(uuid);
+drop function if exists public.preview_momo_sms(text);
+drop function if exists public.ingest_momo_sms(text, text);
+drop function if exists public.claim_match_hints(uuid);
+drop function if exists public.confirm_with_receipt(uuid, uuid);
+drop function if exists private.parse_momo_sms(text);

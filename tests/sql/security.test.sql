@@ -1,5 +1,5 @@
 -- Behavioural security tests for the SquadVault migrations. Run via tests/run-sql-tests.sh
--- (needs a scratch Postgres with supabase_stub.sql + migrations 001-007 applied). Everything runs in
+-- (needs a scratch Postgres with supabase_stub.sql + migrations 001-008 applied). Everything runs in
 -- one transaction that is rolled back at the end. Any failed assertion aborts with a message.
 \set ON_ERROR_STOP on
 begin;
@@ -310,6 +310,135 @@ reset role;
 set local role anon;
 select t.expect_err($$select public.submit_payment_claim(gen_random_uuid(), 5000, null)$$, 'permission denied');
 select t.expect_err($$select public.add_member_by_email(gen_random_uuid(), 'a@x.rw')$$, 'permission denied');
+reset role;
+
+-- ===== 008: automatic checking from forwarded MoMo SMS ===================================
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.add_member_by_email(:'g', 'e@x.rw');
+select public.create_event(:'g', 'SMS Event', 500000, null) as s \gset
+select set_config('t.s', :'s', true);
+select public.set_event_payment_details(:'s', 'mtn_momo', 'number', '0788123456', 'Leader', null);
+do $$ declare p record; begin
+  select * into p from private.parse_momo_sms('You have received 20,000 RWF from John Doe (*****123) on your Mobile Money account at 2026-10-19 10:00:00. Your new balance: 70000 RWF. Financial Transaction Id: 123456789012.');
+  assert p.is_receipt and p.amount = 20000 and p.txn_id = '123456789012' and p.payer_hint = 'John Doe', 'parses a typical received-money SMS: ' || coalesce(p::text, 'null');
+  select * into p from private.parse_momo_sms('You have received RWF 5000.00 from Eric on your account. Transaction ID: 99887766.');
+  assert p.is_receipt and p.amount = 5000 and p.txn_id = '99887766' and p.payer_hint = 'Eric', 'parses another wording: ' || coalesce(p::text, 'null');
+  select * into p from private.parse_momo_sms('You have sent 5000 RWF to Aline. Transaction Id: 555555555.');
+  assert not p.is_receipt, 'outgoing SMS is never a receipt';
+  select * into p from private.parse_momo_sms('Your balance is 5000 RWF. Dial *182# for more.');
+  assert not p.is_receipt, 'balance SMS is not a receipt';
+  select * into p from private.parse_momo_sms('hello');
+  assert not p.is_receipt, 'junk is not a receipt';
+end $$;
+select set_config('t.pv', public.preview_momo_sms('You have received 1,500 RWF from Marie. Financial Transaction Id: 424242424242.')::text, true);
+do $$ begin assert (current_setting('t.pv')::jsonb ->> 'amount') = '1500' and (current_setting('t.pv')::jsonb ->> 'txn_id') = '424242424242', 'preview parses without storing'; end $$;
+reset role;
+-- members cannot manage collectors; treasurer can
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select t.expect_err($$select public.create_collector_token(current_setting('t.g')::uuid)$$, 'not_allowed');
+select t.expect_err($$select public.collector_status(current_setting('t.g')::uuid)$$, 'not_allowed');
+select t.expect_err($$select * from public.claim_match_hints(current_setting('t.s')::uuid)$$, 'not_allowed');
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.create_collector_token(:'g') as tok \gset
+select set_config('t.tok', :'tok', true);
+do $$ begin
+  assert current_setting('t.tok') ~ '^SVC-[0-9A-F]{32}$', 'token format';
+  assert (public.collector_status(current_setting('t.g')::uuid) ->> 'active')::boolean, 'collector active';
+end $$;
+reset role;
+do $$ begin assert (select token_hash from public.momo_collectors where revoked_at is null) = encode(extensions.digest(current_setting('t.tok'), 'sha256'), 'hex'), 'only the hash is stored';
+  assert (select count(*) from public.momo_collectors where token_hash like '%' || current_setting('t.tok') || '%') = 0, 'plain token not stored'; end $$;
+
+-- anonymous phone app: bad token is rejected, good token stores receipts
+set local role anon;
+do $$ begin
+  assert public.ingest_momo_sms('nope', 'You have received 100 RWF from X. Transaction Id: 1') ->> 'error' = 'invalid_token', 'bad token format';
+  assert public.ingest_momo_sms('SVC-00000000000000000000000000000000', 'You have received 20000 RWF from X. Transaction Id: 100000000001') ->> 'error' = 'invalid_token', 'unknown token';
+  assert public.ingest_momo_sms(current_setting('t.tok'), 'Your balance is 5000 RWF') ->> 'reason' = 'not_a_receipt', 'non-receipt ignored';
+  assert (public.ingest_momo_sms(current_setting('t.tok'), 'You have received 20,000 RWF from Eric Kamanzi on your account. Financial Transaction Id: 111111111111.') ->> 'stored')::boolean, 'receipt 1 stored';
+  assert public.ingest_momo_sms(current_setting('t.tok'), 'You have received 20,000 RWF from Eric Kamanzi on your account. Financial Transaction Id: 111111111111.') ->> 'reason' = 'duplicate', 'identical SMS is not stored twice';
+  assert public.ingest_momo_sms(current_setting('t.tok'), 'You have received 20,000 RWF from Eric K on your account (resent). Financial Transaction Id: 111111111111.') ->> 'reason' = 'duplicate', 'same transaction ID is not stored twice';
+end $$;
+select t.expect_err($$select * from public.momo_receipts$$, 'permission denied');
+select t.expect_err($$select * from public.momo_collectors$$, 'permission denied');
+select t.expect_err($$select public.create_collector_token(gen_random_uuid())$$, 'permission denied');
+select t.expect_err($$select public.claim_match_hints(gen_random_uuid())$$, 'permission denied');
+reset role;
+
+-- member E claims with the real transaction ID -> verified automatically (receipt arrived first)
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select public.submit_payment_claim(:'s', 20000, '111111111111') as k1 \gset
+select public.submit_payment_claim(:'s', 20000, '222222222222') as k2 \gset
+select public.submit_payment_claim(:'s', 5000, '333333333333') as k3 \gset
+select public.submit_payment_claim(:'s', 7000, null) as k4 \gset
+select public.submit_payment_claim(:'s', 9000, '999999999999') as k5 \gset
+select set_config('t.k1', :'k1', true), set_config('t.k2', :'k2', true), set_config('t.k3', :'k3', true), set_config('t.k4', :'k4', true), set_config('t.k5', :'k5', true);
+do $$ begin
+  assert (select status from public.contributions where id = current_setting('t.k1')::uuid) = 'paid', 'receipt already there -> claim auto-verified';
+  assert (select note from public.contributions where id = current_setting('t.k1')::uuid) = 'Auto-verified from MoMo SMS', 'note says auto-verified';
+  assert (select status from public.contributions where id = current_setting('t.k2')::uuid) = 'pending', 'no receipt yet -> pending';
+end $$;
+reset role;
+set local role anon;
+do $$ begin
+  assert (public.ingest_momo_sms(current_setting('t.tok'), 'You have received 20000 RWF from Eric. Financial Transaction Id: 222222222222.') ->> 'matched')::boolean, 'receipt arrives later -> waiting claim auto-verified';
+  assert not (public.ingest_momo_sms(current_setting('t.tok'), 'You have received 4000 RWF from Eric. Financial Transaction Id: 333333333333.') ->> 'matched')::boolean, 'same ID but different amount is NOT auto-verified';
+  assert not (public.ingest_momo_sms(current_setting('t.tok'), 'You have received 7000 RWF from Marie. Financial Transaction Id: 444444444444.') ->> 'matched')::boolean, 'claim without ID is never auto-verified';
+end $$;
+reset role;
+do $$ begin
+  assert (select status from public.contributions where id = current_setting('t.k2')::uuid) = 'paid', 'k2 paid';
+  assert (select status from public.contributions where id = current_setting('t.k3')::uuid) = 'pending', 'k3 (amount differs) still pending';
+  assert (select status from public.contributions where id = current_setting('t.k4')::uuid) = 'pending', 'k4 (no ID) still pending';
+  assert (select status from public.contributions where id = current_setting('t.k5')::uuid) = 'pending', 'k5 (fake ID, no receipt) still pending';
+end $$;
+
+-- leader sees suggestions and can confirm against a specific SMS
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+do $$ begin
+  assert (select strength from public.claim_match_hints(current_setting('t.s')::uuid) where contribution_id = current_setting('t.k3')::uuid) = 'id', 'same-ID hint';
+  assert (select receipt_amount from public.claim_match_hints(current_setting('t.s')::uuid) where contribution_id = current_setting('t.k3')::uuid) = 4000, 'hint shows the SMS amount';
+  assert (select strength from public.claim_match_hints(current_setting('t.s')::uuid) where contribution_id = current_setting('t.k4')::uuid) = 'amount', 'amount-only hint';
+  assert not exists (select 1 from public.claim_match_hints(current_setting('t.s')::uuid) where contribution_id = current_setting('t.k5')::uuid), 'fake ID gets no hint';
+end $$;
+select receipt_id as rid3 from public.claim_match_hints(:'s') where contribution_id = current_setting('t.k3')::uuid limit 1 \gset
+select receipt_id as rid4 from public.claim_match_hints(:'s') where contribution_id = current_setting('t.k4')::uuid limit 1 \gset
+select set_config('t.rid3', :'rid3', true), set_config('t.rid4', :'rid4', true);
+select t.expect_err($$select public.confirm_with_receipt(current_setting('t.k3')::uuid, current_setting('t.rid3')::uuid)$$, 'amount_mismatch');
+select public.confirm_with_receipt(:'k4', :'rid4');
+select t.expect_err($$select public.confirm_with_receipt(current_setting('t.k5')::uuid, current_setting('t.rid4')::uuid)$$, 'receipt_used');  -- a used SMS cannot confirm a second claim
+do $$ begin
+  assert (select status from public.contributions where id = current_setting('t.k4')::uuid) = 'paid', 'leader confirmed against the SMS';
+  assert (select note from public.contributions where id = current_setting('t.k4')::uuid) = 'Confirmed against MoMo SMS', 'note';
+  -- money model: 20000 + 20000 + 7000 are counted; the 5000 and 9000 claims are not
+  assert (select paid_total from public.event_financials where event_id = current_setting('t.s')::uuid) = 47000, 'only verified claims count';
+  assert (select pending_total from public.event_financials where event_id = current_setting('t.s')::uuid) = 14000, 'unverified claims stay pending';
+end $$;
+-- a receipt can only be used once
+reset role;
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select public.submit_payment_claim(:'s', 7000, null) as k6 \gset
+select set_config('t.k6', :'k6', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select t.expect_err($$select public.confirm_with_receipt(current_setting('t.k6')::uuid, current_setting('t.rid4')::uuid)$$, 'receipt_used');
+-- a leader cannot confirm their own claim (only the admin can)
+select public.submit_payment_claim(:'s', 1000, null) as k7 \gset
+select set_config('t.k7', :'k7', true);
+select t.expect_err($$select public.review_contribution(current_setting('t.k7')::uuid, 'paid')$$, 'cannot_review_own');
+select public.revoke_collector_token(:'g');
+reset role;
+set local role anon;
+do $$ begin assert public.ingest_momo_sms(current_setting('t.tok'), 'You have received 1000 RWF from X. Transaction Id: 777777777') ->> 'error' = 'invalid_token', 'revoked token stops working'; end $$;
 reset role;
 
 -- anon has nothing
