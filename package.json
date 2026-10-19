@@ -1,0 +1,13 @@
+{
+  "name": "squadvault",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SquadVault: private savings groups for Rwanda. Plain HTML, CSS and JavaScript. No framework, no build step, no runtime dependencies.",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs 5173",
+    "test": "node --test tests/utils.test.mjs",
+    "check": "node tests/check-syntax.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

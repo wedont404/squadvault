@@ -1,0 +1,24 @@
+# Minimal Supabase CLI config for deploying the SquadVault Edge Functions.
+# Run `supabase link --project-ref mdvgvhnceouabyuhsbio` once, then `supabase functions deploy`.
+#
+# Functions are plain JavaScript (Deno runs JS natively), so `entrypoint` points at index.js.
+#
+# verify_jwt is OFF for all three functions on purpose:
+#   * payment-webhook is called by the payment provider, which has no Supabase JWT.
+#   * create-payment and verify-payment verify the caller themselves with
+#     supabase.auth.getUser(token) (see functions/_shared/clients.js). This works with both
+#     legacy and new-style (publishable key / asymmetric JWT) projects.
+
+project_id = "mdvgvhnceouabyuhsbio"
+
+[functions.create-payment]
+verify_jwt = false
+entrypoint = "./functions/create-payment/index.js"
+
+[functions.verify-payment]
+verify_jwt = false
+entrypoint = "./functions/verify-payment/index.js"
+
+[functions.payment-webhook]
+verify_jwt = false
+entrypoint = "./functions/payment-webhook/index.js"
