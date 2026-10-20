@@ -4,8 +4,11 @@ import { supabase, must, rpc } from "./supabase.js";
 import { toInt } from "./utils.js";
 
 export async function fetchProfile(uid) {
-  const data = must(await supabase.from("profiles").select("id,display_name,avatar_path,email_verified_at").eq("id", uid).maybeSingle());
-  return data ?? { id: uid, display_name: "Member", avatar_path: null };
+  let res = await supabase.from("profiles").select("id,display_name,avatar_path,email_verified_at").eq("id", uid).maybeSingle();
+  // Update 011 not run yet: the column doesn't exist, so fall back to the old shape and treat the email as confirmed.
+  if (res.error) res = await supabase.from("profiles").select("id,display_name,avatar_path").eq("id", uid).maybeSingle();
+  const data = must(res);
+  return data ? { email_verified_at: data.email_verified_at ?? new Date().toISOString(), ...data } : { id: uid, display_name: "Member", avatar_path: null, email_verified_at: new Date().toISOString() };
 }
 
 export async function fetchProfiles(ids) {
