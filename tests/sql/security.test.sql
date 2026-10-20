@@ -27,12 +27,20 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'd@x.rw', '{}');
 
 do $$ begin assert (select count(*) from public.profiles) = 4, 'profile trigger/backfill'; end $$;
+-- 011 gates chat and photos on a confirmed email; the older tests use verified people (the gate has its own block)
+update public.profiles set email_verified_at = now();
+create function t.autoverify() returns trigger language plpgsql as $$ begin new.email_verified_at := now(); return new; end $$;
+create trigger t_autoverify before insert on public.profiles for each row execute function t.autoverify();
 
 -- ===== A creates a group and an event ====================================================
 select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
 set local role authenticated;
 select public.create_savings_group('  Kigali Squad ') as g \gset
 select set_config('t.g', :'g', true);
+reset role;
+-- the earlier tests exercise paid features, so this group is on Pro (plan limits have their own block below)
+update public.savings_groups set plan = 'pro', plan_until = now() + interval '1 year' where id = :'g';
+set local role authenticated;
 do $$ begin
   assert (select role from public.group_members where group_id = current_setting('t.g')::uuid) = 'admin', 'creator is admin';
   assert (select name from public.savings_groups) = 'Kigali Squad', 'name trimmed';
@@ -683,6 +691,152 @@ set local role anon;
 select t.expect_err($$select public.list_games(gen_random_uuid())$$, 'permission denied');
 select t.expect_err($$select public.post_group_message(gen_random_uuid(), 'x')$$, 'permission denied');
 select t.expect_err($$select * from public.group_messages$$, 'permission denied');
+reset role;
+
+
+-- ===== 010: plans, limits, upgrade requests ====================================================
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('0a0a0a0a-0a0a-0a0a-0a0a-0a0a0a0a0a0a', 'owner@x.rw', '{"display_name":"Owner"}');
+insert into public.platform_admins (user_id) values ('0a0a0a0a-0a0a-0a0a-0a0a-0a0a0a0a0a0a');
+select set_config('request.jwt.claim.sub', 'dddddddd-dddd-dddd-dddd-dddddddddddd', true);
+set local role authenticated;
+select public.create_savings_group('Free Squad') as fg \gset
+select set_config('t.fg', :'fg', true);
+do $$ begin
+  assert (public.plan_overview(current_setting('t.fg')::uuid) ->> 'plan') = 'free', 'new groups start on Free';
+  assert (public.plan_overview(current_setting('t.fg')::uuid) -> 'limits' ->> 'members') = '15', 'free limit: 15 members';
+end $$;
+select public.create_event(:'fg', 'One', 1000, null);
+select public.create_event(:'fg', 'Two', 1000, null) as fe2 \gset
+select set_config('t.fe2', :'fe2', true);
+select t.expect_err($$select public.create_event(current_setting('t.fg')::uuid, 'Three', 1000, null)$$, 'plan_limit_events');
+-- a finished event frees a slot; reopening past the limit is blocked
+select public.set_event_status(:'fe2', 'completed');
+select public.create_event(:'fg', 'Three', 1000, null) as fe3 \gset
+select t.expect_err($$select public.set_event_status(current_setting('t.fe2')::uuid, 'active')$$, 'plan_limit_events');
+-- automatic checking is a paid feature
+select t.expect_err($$select public.create_collector_token(current_setting('t.fg')::uuid)$$, 'plan_feature_autocheck');
+-- members: fill to 15, the 16th is refused for every route (direct add)
+reset role;
+insert into auth.users (id, email, raw_user_meta_data)
+  select gen_random_uuid(), 'bulk' || i || '@x.rw', '{}' from generate_series(1, 20) i;
+select set_config('request.jwt.claim.sub', 'dddddddd-dddd-dddd-dddd-dddddddddddd', true);
+set local role authenticated;
+do $$ declare i int; begin
+  for i in 1..14 loop perform public.add_member_by_email(current_setting('t.fg')::uuid, 'bulk' || i || '@x.rw'); end loop;
+end $$;
+select t.expect_err($$select public.add_member_by_email(current_setting('t.fg')::uuid, 'bulk15@x.rw')$$, 'plan_limit_members');
+do $$ begin assert (public.plan_overview(current_setting('t.fg')::uuid) -> 'usage' ->> 'members') = '15', 'usage counted'; end $$;
+-- upgrade request: only the admin, validated, one at a time, reference unique
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select t.expect_err($$select public.plan_overview(current_setting('t.fg')::uuid)$$, 'not_allowed');
+select t.expect_err($$select public.request_plan_upgrade(current_setting('t.fg')::uuid, 'plus', 'month', 'ABC123456')$$, 'not_allowed');
+reset role;
+select set_config('request.jwt.claim.sub', 'dddddddd-dddd-dddd-dddd-dddddddddddd', true);
+set local role authenticated;
+select t.expect_err($$select public.request_plan_upgrade(current_setting('t.fg')::uuid, 'gold', 'month', 'ABC123456')$$, 'invalid_plan');
+select t.expect_err($$select public.request_plan_upgrade(current_setting('t.fg')::uuid, 'plus', 'month', 'ab')$$, 'invalid_reference');
+select public.request_plan_upgrade(:'fg', 'plus', 'year', 'mp26plus001') as rq \gset
+select set_config('t.rq', :'rq', true);
+do $$ begin
+  assert (public.plan_overview(current_setting('t.fg')::uuid) -> 'pending' ->> 'amount') = '20000', 'amount comes from the plans table, not the browser';
+  assert (public.plan_overview(current_setting('t.fg')::uuid) -> 'pending' ->> 'txn_ref') = 'MP26PLUS001', 'pending request visible';
+end $$;
+select t.expect_err($$select public.request_plan_upgrade(current_setting('t.fg')::uuid, 'pro', 'month', 'MP26OTHER02')$$, 'request_pending');
+select t.expect_err($$select * from public.plan_requests$$, 'permission denied');
+select t.expect_err($$select public.owner_list_plan_requests()$$, 'not_allowed');
+select t.expect_err($$select public.owner_decide_plan_request(current_setting('t.rq')::uuid, true)$$, 'not_allowed');
+select t.expect_err($$select public.owner_set_plan(current_setting('t.fg')::uuid, 'pro', 30)$$, 'not_allowed');
+do $$ begin assert (public.owner_summary() ->> 'is_owner')::boolean = false, 'normal users are not owners'; end $$;
+select t.expect_err($$update public.savings_groups set plan = 'pro'$$, 'permission denied');
+reset role;
+-- the owner approves
+select set_config('request.jwt.claim.sub', '0a0a0a0a-0a0a-0a0a-0a0a-0a0a0a0a0a0a', true);
+set local role authenticated;
+do $$ begin
+  assert (public.owner_summary() ->> 'is_owner')::boolean and (public.owner_summary() ->> 'pending') = '1', 'owner sees one pending request';
+  assert (select requester_email from public.owner_list_plan_requests() limit 1) = 'd@x.rw', 'owner sees who asked';
+end $$;
+select public.owner_decide_plan_request(:'rq', true);
+select t.expect_err($$select public.owner_decide_plan_request(current_setting('t.rq')::uuid, false)$$, 'invalid_transition');
+reset role;
+do $$ begin
+  assert (select plan from public.savings_groups where id = current_setting('t.fg')::uuid) = 'plus', 'group is now on Plus';
+  assert (select plan_until from public.savings_groups where id = current_setting('t.fg')::uuid) > now() + interval '360 days', 'a year of Plus';
+end $$;
+select set_config('request.jwt.claim.sub', 'dddddddd-dddd-dddd-dddd-dddddddddddd', true);
+set local role authenticated;
+select public.create_event(:'fg', 'Four', 1000, null);
+select public.create_event(:'fg', 'Five', 1000, null);
+select public.add_member_by_email(:'fg', 'bulk15@x.rw');
+select public.create_collector_token(:'fg');
+-- expiry drops the group back to Free, nothing is deleted, only new additions are blocked
+reset role;
+update public.savings_groups set plan_until = now() - interval '1 day' where id = :'fg';
+set local role authenticated;
+do $$ begin
+  assert (public.plan_overview(current_setting('t.fg')::uuid) ->> 'plan') = 'free' and (public.plan_overview(current_setting('t.fg')::uuid) ->> 'expired')::boolean, 'expired plan reads as Free';
+  assert (select count(*) from public.group_members where group_id = current_setting('t.fg')::uuid) = 16, 'existing members stay';
+end $$;
+select t.expect_err($$select public.add_member_by_email(current_setting('t.fg')::uuid, 'bulk16@x.rw')$$, 'plan_limit_members');
+reset role;
+-- rejected requests are recorded and don't change the plan
+select set_config('request.jwt.claim.sub', 'dddddddd-dddd-dddd-dddd-dddddddddddd', true);
+set local role authenticated;
+select public.request_plan_upgrade(:'fg', 'pro', 'month', 'MP26PRO0003') as rq2 \gset
+select set_config('t.rq2', :'rq2', true);
+select public.cancel_plan_request(:'fg');
+select public.request_plan_upgrade(:'fg', 'pro', 'month', 'MP26PRO0004') as rq3 \gset
+select set_config('t.rq3', :'rq3', true);
+reset role;
+select set_config('request.jwt.claim.sub', '0a0a0a0a-0a0a-0a0a-0a0a-0a0a0a0a0a0a', true);
+set local role authenticated;
+select public.owner_decide_plan_request(:'rq3', false, 'No such payment');
+select public.owner_set_plan(:'fg', 'pro', 30);
+reset role;
+do $$ begin
+  assert (select status from public.plan_requests where id = current_setting('t.rq3')::uuid) = 'rejected', 'rejection recorded';
+  assert (select plan from public.savings_groups where id = current_setting('t.fg')::uuid) = 'pro', 'owner can grant a plan by hand';
+end $$;
+set local role anon;
+select t.expect_err($$select public.owner_summary()$$, 'permission denied');
+select t.expect_err($$select * from public.plans$$, 'permission denied');
+reset role;
+
+
+-- ===== 011: deferred email confirmation ====================================================
+reset role;
+drop trigger t_autoverify on public.profiles;
+insert into auth.users (id, email, raw_user_meta_data) values ('71717171-7171-7171-7171-717171717171', 'late@x.rw', '{"display_name":"Late"}');
+do $$ begin assert (select email_verified_at from public.profiles where id = '71717171-7171-7171-7171-717171717171') is null, 'new people start unverified'; end $$;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.add_member_by_email(:'g', 'late@x.rw');
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select t.expect_err($$select public.post_group_message(current_setting('t.g')::uuid, 'hi')$$, 'email_unverified');
+-- a normal password session can't prove the email
+select set_config('request.jwt.claims', '{"sub":"71717171-7171-7171-7171-717171717171","amr":[{"method":"password","timestamp":' || extract(epoch from now())::bigint || '}]}', true);
+select t.expect_err($$select public.confirm_my_email()$$, 'email_not_proven');
+-- an old email code doesn't count
+select set_config('request.jwt.claims', '{"sub":"71717171-7171-7171-7171-717171717171","amr":[{"method":"otp","timestamp":' || (extract(epoch from now())::bigint - 7200) || '}]}', true);
+select t.expect_err($$select public.confirm_my_email()$$, 'email_not_proven');
+-- no claim at all
+select set_config('request.jwt.claims', '', true);
+select t.expect_err($$select public.confirm_my_email()$$, 'email_not_proven');
+-- a fresh email one-time-code session does
+select set_config('request.jwt.claims', '{"sub":"71717171-7171-7171-7171-717171717171","amr":[{"method":"otp","timestamp":' || extract(epoch from now())::bigint || '}]}', true);
+select public.confirm_my_email();
+select set_config('request.jwt.claims', '', true);
+select public.post_group_message(:'g', 'hello at last');
+do $$ begin assert exists (select 1 from public.group_messages where body = 'hello at last'), 'verified person can chat'; end $$;
+reset role;
+set local role anon;
+select t.expect_err($$select public.confirm_my_email()$$, 'permission denied');
 reset role;
 
 -- anon has nothing

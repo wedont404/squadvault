@@ -1,7 +1,8 @@
 // Squad hub: group chat, photo wall (with hearts) and games (polls + "guess the number").
 // Reads go through RLS / read-only RPCs; every write is a SECURITY DEFINER RPC.
 import { state, activeGroup, isManagerRole } from "./state.js";
-import { fetchMessages, fetchPhotos, fetchGames, fetchEvents } from "./data.js";
+import { fetchMessages, fetchPhotos, fetchGames, fetchEvents, fetchProfile } from "./data.js";
+import { sendVerifyEmail } from "./auth.js";
 import { rpc, friendlyError } from "./supabase.js";
 import { navigate } from "./router.js";
 import { uploadGroupImage, removeGroupImage, PHOTO_TYPES } from "./media.js";
@@ -10,6 +11,11 @@ import {
   $, mount, on, icon, avatar, freshView, toast, toastError, openModal, confirmDialog, loadInto, setBusy,
   field, formData, formMessage, formMsgSlot, setFieldError, clearFieldErrors, emptyState, skeletonList,
 } from "./ui.js";
+
+const verifyBanner = (what) => html`<div class="form-msg info" role="status" data-verify-banner style="display:grid;gap:8px">
+  <div><strong>Confirm your email to ${what}.</strong> It takes one tap: we email you a link to ${state.user.email}. Reading is always open.</div>
+  <div class="row wrap" style="gap:8px"><button class="btn sm primary" type="button" data-verify>${icon("send")} Send confirmation email</button>
+    <button class="btn sm" type="button" data-verify-recheck>${icon("refresh")} I've confirmed it</button></div></div>`;
 
 const TABS = [["chat", "Chat", "chat"], ["photos", "Photos", "image"], ["games", "Games", "game"]];
 
@@ -25,8 +31,22 @@ export async function renderHub({ outlet, query, isCurrent }) {
     <div data-pane></div>`);
   on(outlet, "click", "[data-tab]", (_, b) => navigate(`/squad?tab=${b.dataset.tab}`));
   const pane = $("[data-pane]", outlet);
-  if (tab === "chat") await mountChat(pane, group, isCurrent);
-  else if (tab === "photos") await mountPhotos(pane, group, isCurrent);
+  // Chat and photos need a confirmed email. Fresh read each time, so confirming in another tab shows up here.
+  let verified = true;
+  if (tab !== "games") {
+    try { verified = Boolean((await fetchProfile(state.user.id)).email_verified_at); } catch { verified = true; /* the database still enforces it */ }
+  }
+  on(outlet, "click", "[data-verify]", async (_, b) => {
+    setBusy(b, true, "Sending…");
+    const r = await sendVerifyEmail(state.user.email);
+    setBusy(b, false);
+    if (r.ok) toast(`We sent a link to ${state.user.email}. Open it (check spam too), and you'll come straight back here.`, "success", 9000);
+    else if (r.wait) toast(`Please wait ${r.wait} seconds before asking again.`, "info");
+    else toastError(r.error);
+  });
+  on(outlet, "click", "[data-verify-recheck]", () => navigate(`/squad?tab=${tab}&t=${Date.now()}`));
+  if (tab === "chat") await mountChat(pane, group, isCurrent, verified);
+  else if (tab === "photos") await mountPhotos(pane, group, isCurrent, verified);
   else await mountGames(pane, group, isCurrent);
 }
 
@@ -39,15 +59,16 @@ const clock = (iso) => {
   return d.toDateString() === new Date().toDateString() ? t : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${t}`;
 };
 
-async function mountChat(host, group, isCurrent) {
+async function mountChat(host, group, isCurrent, verified = true) {
   const me = state.user.id;
   const manager = isManagerRole(group.role);
   mount(host, html`<div class="card flush chat">
     <div class="chat-log" data-log tabindex="0" role="log" aria-live="polite" aria-label="Group chat"><div class="skeleton sk-card" style="height:80px;margin:16px"></div></div>
+    ${verified ? "" : html`<div style="padding:10px;border-top:1px solid var(--border-soft)">${verifyBanner("chat")}</div>`}
     <form class="chat-form" data-send novalidate>
       <label class="sr-only" for="chat-body">Message</label>
-      <textarea class="input" id="chat-body" name="body" rows="1" maxlength="1000" placeholder="Message your squad…" autocomplete="off"></textarea>
-      <button class="btn primary" type="submit" aria-label="Send message">${icon("send")}</button></form></div>
+      <textarea class="input" id="chat-body" name="body" rows="1" maxlength="1000" placeholder="${verified ? "Message your squad…" : "Confirm your email to chat"}" autocomplete="off" ${verified ? "" : "disabled"}></textarea>
+      <button class="btn primary" type="submit" aria-label="Send message" ${verified ? "" : "disabled"}>${icon("send")}</button></form></div>
     <p class="faint" style="font-size:var(--fs-xs);margin-top:8px">Only members of ${group.name} can read this chat. Never share your MoMo PIN here. Leaders will never ask for it.</p>`);
   const log = $("[data-log]", host);
   const form = $("[data-send]", host);
@@ -106,7 +127,7 @@ async function mountChat(host, group, isCurrent) {
 // ---------------------------------------------------------------------------
 // Photos
 // ---------------------------------------------------------------------------
-async function mountPhotos(host, group, isCurrent) {
+async function mountPhotos(host, group, isCurrent, verified = true) {
   const me = state.user.id;
   const manager = isManagerRole(group.role);
   const view = freshView(host);
@@ -116,8 +137,9 @@ async function mountPhotos(host, group, isCurrent) {
     load: async () => ({ photos: await fetchPhotos(group.id), events: await fetchEvents([group.id]) }),
     render: ({ photos, events }) => {
       mount(view, html`<div class="row between wrap" style="margin-bottom:var(--s4)"><p class="muted">Share moments with your squad. Tap the heart on the ones you love.</p>
-        <label class="btn primary" for="photo-file" style="cursor:pointer">${icon("upload")} Add a photo</label>
-        <input class="sr-only" id="photo-file" type="file" accept="${PHOTO_TYPES.join(",")}" data-file></div>
+        ${verified ? html`<label class="btn primary" for="photo-file" style="cursor:pointer">${icon("upload")} Add a photo</label>
+        <input class="sr-only" id="photo-file" type="file" accept="${PHOTO_TYPES.join(",")}" data-file>` : ""}</div>
+        ${verified ? "" : html`<div style="margin-bottom:var(--s4)">${verifyBanner("share photos")}</div>`}
         ${photos.length
           ? html`<div class="photo-grid">${photos.map((p) => html`<figure class="ph">
               <button class="ph-img" type="button" data-open="${p.id}" aria-label="Open photo${p.caption ? `: ${p.caption}` : ""}"><img data-sbimg="${p.path}" alt="${p.caption || `Photo by ${p.name}`}" loading="lazy"></button>
@@ -125,8 +147,8 @@ async function mountPhotos(host, group, isCurrent) {
                 <button class="like ${p.liked_by_me ? "on" : ""}" type="button" data-like="${p.id}" aria-pressed="${p.liked_by_me}" aria-label="Heart this photo">${icon("heart")}<span>${p.like_count}</span></button></figcaption></figure>`)}</div>`
           : emptyState({ iconName: "image", title: "No photos yet", text: "Be the first to share a moment from your squad." })}`);
 
-      const redraw = () => mountPhotos(host, group, isCurrent);
-      $("[data-file]", view).addEventListener("change", (e) => {
+      const redraw = () => mountPhotos(host, group, isCurrent, verified);
+      $("[data-file]", view)?.addEventListener("change", (e) => {
         const file = e.target.files?.[0];
         e.target.value = "";
         if (file) openUploadDialog({ file, group, events, onDone: redraw });

@@ -7,6 +7,7 @@ import { activityRows } from "./components.js";
 import { openCreateGroupDialog } from "./groups.js";
 import { openJoinDialog } from "./invitations.js";
 import { returnsAlert } from "./momo.js";
+import { fetchOwnerSummary } from "./data.js";
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -20,14 +21,15 @@ export async function renderDashboard({ outlet, isCurrent }) {
     load: async () => {
       const ids = state.groups.map((g) => g.id);
       if (!ids.length) return null;
-      const [events, fin, myPending, contributions, expenses] = await Promise.all([
+      const [events, fin, myPending, contributions, expenses, owner] = await Promise.all([
         fetchEvents(ids),
         fetchFinancials(ids),
         fetchContributions({ userId: state.user.id, status: "pending", limit: 50 }),
         fetchContributions({ limit: 10 }),
         fetchExpenses({ limit: 10 }),
+        fetchOwnerSummary(),
       ]);
-      return { events, fin, myPending, contributions, expenses };
+      return { events, fin, myPending, contributions, expenses, owner };
     },
     render: (data) => {
       const name = (state.profile?.display_name ?? "there").split(" ")[0];
@@ -46,7 +48,7 @@ export async function renderDashboard({ outlet, isCurrent }) {
         return;
       }
 
-      const { events, fin, myPending, contributions, expenses } = data;
+      const { events, fin, myPending, contributions, expenses, owner } = data;
       const active = events.filter((e) => e.status === "active");
       const upcoming = active.filter((e) => e.event_date && daysUntil(e.event_date) >= 0).sort((a, b) => a.event_date.localeCompare(b.event_date));
       const totalVerified = sum([...fin.values()], (f) => f.paid_total);
@@ -63,6 +65,7 @@ export async function renderDashboard({ outlet, isCurrent }) {
           ${statCard({ label: "Upcoming events", value: upcoming.length, hint: next ? `Next: ${next.name}, ${formatDate(next.event_date)}` : "No dated events", tone: "violet", iconName: "calendar" })}
         </div>
 
+        ${owner?.is_owner && owner.pending > 0 ? html`<div class="section"><div class="form-msg info" role="status"><strong>${owner.pending} plan upgrade request${owner.pending === 1 ? "" : "s"} waiting.</strong> <a href="#/owner" style="color:inherit;text-decoration:underline">Review</a></div></div>` : ""}
         ${returnsAlert(events, fin)}
 
         <div class="section"><div class="section-head"><h2>Quick actions</h2></div>

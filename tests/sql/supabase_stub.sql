@@ -15,7 +15,8 @@ create table storage.objects (id uuid default gen_random_uuid() primary key, buc
 alter table storage.objects enable row level security;
 create function storage.foldername(name text) returns text[] language sql immutable as $$ select string_to_array(name,'/') $$;
 grant usage on schema auth, storage, extensions, public to anon, authenticated, service_role;
-grant execute on function auth.uid() to anon, authenticated, service_role;
+create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true),''),'{}')::jsonb $$;
+grant execute on function auth.uid(), auth.jwt() to anon, authenticated, service_role;
 grant select on storage.objects to authenticated;
 -- Supabase default privileges: new public tables/functions are usable by API roles (this is what you get on a real project)
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;

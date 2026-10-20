@@ -39,7 +39,7 @@ const G1='aaaaaaaa-0000-4000-8000-000000000001', G2='aaaaaaaa-0000-4000-8000-000
 const E1='eeeeeeee-0000-4000-8000-000000000001', E2='eeeeeeee-0000-4000-8000-000000000002', E3='eeeeeeee-0000-4000-8000-000000000003';
 const now=Date.now(), iso=(d)=>new Date(now-d*3600e3).toISOString();
 const db={
-  profiles:[{id:U1,display_name:'Pop Mugisha',avatar_path:null},{id:U2,display_name:'Aline Uwase',avatar_path:null}],
+  profiles:[{id:U1,display_name:'Pop Mugisha',avatar_path:null,email_verified_at:iso(100)},{id:U2,display_name:'Aline Uwase',avatar_path:null}],
   groups:[{user_id:U1,role:'admin',joined_at:iso(500),savings_groups:{id:G1,name:'Kigali Besties',currency:'RWF',created_at:iso(500)}},
           {user_id:U1,role:'member',joined_at:iso(300),savings_groups:{id:G2,name:'<img src=x onerror="window.__xss=1">',currency:'RWF',created_at:iso(300)}}],
   members:[{group_id:G1,user_id:U1,role:'admin',joined_at:iso(500)},{group_id:G1,user_id:U2,role:'member',joined_at:iso(200)},{group_id:G2,user_id:U1,role:'member',joined_at:iso(300)}],
@@ -60,6 +60,7 @@ const db={
   _more:0,
   expenses:[{id:'x1',event_id:E1,amount:200000,description:'Venue deposit',receipt_path:G1+'/'+E1+'/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.pdf',recorded_by:U1,created_at:iso(20),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}}],
 };
+window.__db=db;
 const get=(o,k)=>k.split('.').reduce((a,p)=>a?.[p],o);
 function run(st){
   let rows;
@@ -82,7 +83,7 @@ export function createClient(){
   return {
     from:builder,
     rpc: async (name,args)=>{ window.__rpc=(window.__rpc||[]).concat([[name,args]]);
-      if(name==='collector_status') return {data:{active:true,created_at:iso(48),last_seen_at:iso(1),receipts_30d:4,auto_by_name:true},error:null};
+      if(name==='collector_status') return {data:{active:!window.__free,created_at:iso(48),last_seen_at:iso(1),receipts_30d:4,auto_by_name:true},error:null};
       if(name==='claim_match_hints') return {data:[{contribution_id:'c4',receipt_id:'r1',strength:'id',receipt_amount:20000,payer_hint:'Aline U',received_at:iso(2),txn_id:'MP2610ABC123',name_score:100}],error:null};
       if(name==='preview_momo_sms') return {data:{is_receipt:/received/i.test(args.p_message),amount:20000,txn_id:'123456789012',payer_hint:'John Doe'},error:null};
       if(name==='create_collector_token') return {data:'SVC-0123456789ABCDEF0123456789ABCDEF',error:null};
@@ -96,6 +97,12 @@ export function createClient(){
         {id:'gm2',kind:'guess',title:'How much by Friday?',options:null,status:'open',answer:null,created_by:U1,created_at:iso(1),entries:2,my_choice:null,my_guess:480000,counts:null,top:null},
         {id:'gm3',kind:'guess',title:'Guests who come?',options:null,status:'closed',answer:120,created_by:U2,created_at:iso(30),entries:2,my_choice:null,my_guess:100,counts:null,top:[{user_id:U2,guess:118,diff:2},{user_id:U1,guess:100,diff:20}]}],error:null};
       if(name==='add_group_photo') return {data:'p-new',error:null};
+      if(name==='plan_overview') { const free=!!window.__free; return {data:{plan:free?'free':'plus',plan_name:free?'Free':'Plus',booked_plan:free?'free':'plus',until:free?null:new Date(now+20*864e5).toISOString(),expired:false,
+        limits:{members:free?15:150,events:free?2:null,photos:free?30:500,auto_check:!free},usage:{members:2,events:1,photos:1},is_admin:true,pending:window.__pend||null,last_rejected:null,
+        plans:[{code:'free',name:'Free',members:15,events:2,photos:30,auto_check:false,price_month:0,price_year:0},{code:'plus',name:'Plus',members:150,events:null,photos:500,auto_check:true,price_month:2000,price_year:20000},{code:'pro',name:'Pro',members:1000,events:null,photos:5000,auto_check:true,price_month:10000,price_year:100000}]},error:null}; }
+      if(name==='request_plan_upgrade') { window.__pend={id:'rq1',plan:args.p_plan,period:args.p_period,amount:args.p_period==='year'?20000:2000,txn_ref:args.p_txn_ref.toUpperCase(),created_at:iso(0)}; return {data:'rq1',error:null}; }
+      if(name==='owner_summary') return {data:{is_owner:true,pending:1},error:null};
+      if(name==='owner_list_plan_requests') return {data:[{id:'rq9',group_id:G1,group_name:'Kigali Besties',plan:'plus',period:'year',amount:20000,txn_ref:'MP26PLUS001',status:'pending',created_at:iso(2),requester_name:'Pop Mugisha',requester_email:'pop@example.rw',reviewed_at:null,note:null}],error:null};
       if(name==='create_invitation_code') return {data:{id:'i2',code:'SV-0123456789AB',expires_at:new Date(now+7*864e5).toISOString(),max_uses:10},error:null};
       if(name==='join_group_with_code') return {data:{ok:false,error:'invalid_code'},error:null};
       if(name==='create_savings_group') return {data:G1,error:null};
@@ -116,6 +123,7 @@ export function createClient(){
         if(a.email==='exists@example.rw') return {data:{session:null,user:{id:'x',identities:[]}},error:null};
         if(a.email==='busy@example.rw') return {data:{session:null},error:{code:'over_email_send_rate_limit',status:429,message:'email rate limit exceeded'}};
         return {data:{session:null,user:{id:'x',identities:[{id:'i'}]}},error:null}; },
+      signInWithOtp: async(a)=>{ window.__otp=a; return {error:null}; },
       resend: async(a)=>{ window.__resend=a; return {error:null}; }, resetPasswordForEmail: async()=>({error:null}), updateUser: async()=>({error:null}),
       signOut: async()=>{ session=null; localStorage.removeItem('fake-session'); subs.forEach(cb=>cb('SIGNED_OUT',null)); return {error:null}; },
     },
@@ -128,7 +136,7 @@ const E3 = "eeeeeeee-0000-4000-8000-000000000003";
 const ROUTES = [
   ["/dashboard", "Pop, let's save."], ["/groups", "My Groups"], [`/groups/${G1}`, "Kigali Besties"], ["/events", "Events"],
   [`/events/${E1}`, "Aline & Eric Wedding"], ["/contributions", "Contributions"], ["/expenses", "Expenses"],
-  ["/invitations", "Invitations"], ["/squad", "Squad"], ["/profile", "Profile"], ["/settings", "Settings"],
+  ["/invitations", "Invitations"], ["/squad", "Squad"], ["/owner", "Owner"], ["/profile", "Profile"], ["/settings", "Settings"],
 ];
 
 let failures = 0;
@@ -143,7 +151,7 @@ async function newPage(viewport) {
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) { errors.push(`console: ${m.text()}`); if (process.env.DEBUG) console.log("  [console]", m.text().slice(0, 300)); } });
   await page.route("**/cdn.jsdelivr.net/**", (r) => r.fulfill({ contentType: "text/javascript", body: FAKE }));
   await page.route("**/js/config.js", async (r) => {
-    const body = (await readFile(join(root, "js/config.js"), "utf8")).replace('supabasePublishableKey: ""', 'supabasePublishableKey: "sb_publishable_testtesttesttest"');
+    const body = (await readFile(join(root, "js/config.js"), "utf8")).replace('supabasePublishableKey: ""', 'supabasePublishableKey: "sb_publishable_testtesttesttest"').replace('momoNumber: ""', 'momoNumber: "0788000000"');
     r.fulfill({ contentType: "text/javascript", body });
   });
   return { page, errors };
@@ -344,6 +352,40 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await shot(page, "07-autocheck");
   ok((await page.textContent("[data-autocheck]")).includes("/rest/v1/rpc/ingest_momo_sms") && (await page.textContent("[data-autocheck]")).includes("SVC-0123456789ABCDEF0123456789ABCDEF"), "new secret and the forwarder settings are shown once");
 
+  // plans: usage, upgrade request, locked feature on Free
+  await page.waitForSelector("[data-plan] .card");
+  const pl = await page.textContent("[data-plan]");
+  ok(pl.includes("Plus plan") && pl.includes("Active until") && pl.includes("Members") && pl.includes("2 of 150"), "group page shows the plan, its end date and usage against the limits");
+  await page.click("[data-upgrade]");
+  await page.waitForSelector(".dialog [data-amount]");
+  ok((await page.textContent(".dialog")).includes("0788000000") && (await page.textContent("[data-amount]")).includes("2,000"), "upgrade dialog shows the owner's MoMo number and the monthly price");
+  await page.check('input[name="period"][value="year"]');
+  ok((await page.textContent("[data-amount]")).includes("20,000"), "yearly choice updates the amount");
+  await page.click('.dialog button[type="submit"]');
+  ok((await page.textContent("#err-txn")).includes("6 to 20"), "upgrade needs a transaction ID");
+  await page.fill("#f-txn", "mp26plus001");
+  await page.click('.dialog button[type="submit"]');
+  await page.waitForSelector("[data-cancel-req]");
+  const up2 = await page.evaluate(() => window.__rpc.find((r) => r[0] === "request_plan_upgrade")?.[1]);
+  ok(up2?.p_plan === "plus" && up2?.p_period === "year" && up2?.p_txn_ref === "mp26plus001" && !("p_amount" in up2), "request sends plan, period and ID only. The price is decided by the server");
+  ok((await page.textContent("[data-plan]")).includes("waiting for approval"), "pending request is shown to the group admin");
+  await page.evaluate(() => { window.__free = true; window.__pend = null; location.hash = "/dashboard"; });
+  await page.waitForSelector("#outlet h1");
+  await page.evaluate((p) => { location.hash = p; }, `/groups/${G1}`);
+  await page.waitForSelector("[data-go-upgrade]");
+  ok((await page.textContent("[data-autocheck]")).includes("Included in the Plus and Pro plans"), "automatic checking shows as a locked Plus feature on the Free plan");
+  await page.evaluate(() => { window.__free = false; });
+
+  // owner: approve upgrade requests
+  await page.evaluate(() => { location.hash = "/owner"; });
+  await page.waitForSelector("[data-ok]");
+  const ow = await page.textContent("#outlet");
+  ok(ow.includes("Kigali Besties") && ow.includes("MP26PLUS001") && ow.includes("pop@example.rw"), "owner sees the request with the group, payment ID and who asked");
+  await page.click("[data-ok]");
+  await page.click(".dialog [data-ok]");
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "owner_decide_plan_request" && r[1].p_approve === true && r[1].p_request_id === "rq9")), "approving calls owner_decide_plan_request");
+
   // invitations: the active code stays visible, so nobody has to generate extra codes
   await page.evaluate(() => { location.hash = "/invitations"; });
   await page.waitForSelector(".code-box");
@@ -365,6 +407,24 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await page.waitForTimeout(300);
   ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "post_group_message" && r[1].p_body === "See you at the party" && r[1].p_group_id)), "pressing Enter sends the message through post_group_message");
   await shot(page, "09-chat");
+  // unconfirmed email: chat and photos are read-only until the person confirms
+  await page.evaluate(() => { window.__db.profiles[0].email_verified_at = null; });
+  await page.evaluate(() => { location.hash = "/squad?tab=chat&x=1"; });
+  await page.waitForSelector("[data-verify-banner]");
+  ok(await page.isDisabled("#chat-body") && (await page.textContent(".chat-log")).includes("Welcome!"), "unconfirmed email: chat can be read but not written");
+  await page.click("[data-verify]");
+  await page.waitForTimeout(200);
+  const otp = await page.evaluate(() => window.__otp);
+  ok(otp?.email === "pop@example.rw" && otp.options.shouldCreateUser === false && otp.options.emailRedirectTo.startsWith("http"), "confirmation email is a one-time link to the person's own address and never creates accounts");
+  await page.click("[data-verify]");
+  await page.waitForTimeout(150);
+  ok((await page.textContent("body")).includes("Please wait"), "asking again straight away is paused, so the email limit isn't hit");
+  await page.evaluate(() => { location.hash = "/squad?tab=photos&x=2"; });
+  await page.waitForSelector("[data-verify-banner]");
+  ok((await page.$("#photo-file")) === null, "unconfirmed email: no photo upload button");
+  await page.evaluate(() => { window.__db.profiles[0].email_verified_at = new Date().toISOString(); location.hash = "/squad?tab=chat&x=3"; });
+  await page.waitForSelector("#chat-body:not([disabled])");
+  ok(true, "once confirmed, the chat box unlocks");
   await page.click('[data-tab="photos"]');
   await page.waitForSelector(".photo-grid");
   await page.waitForFunction(() => document.querySelector(".ph-img img")?.getAttribute("src")?.startsWith("data:"));
@@ -491,6 +551,14 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await page.goto(`${base}/?token_hash=goodtoken&type=signup`);
   await page.waitForSelector(".app-shell");
   ok(true, "confirm-email link signs the person in");
+  await page.context().close();
+}
+{
+  const { page } = await newPage({ width: 420, height: 800 });
+  await page.goto(`${base}/?token_hash=goodtoken&type=magiclink`);
+  await page.waitForSelector(".app-shell");
+  await page.waitForTimeout(300);
+  ok(await page.evaluate(() => window.__rpc?.some((r) => r[0] === "confirm_my_email")) !== false, "confirmation link signs in and records the confirmed email");
   await page.context().close();
 }
 {

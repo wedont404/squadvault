@@ -15,13 +15,20 @@ function copyRow(label, value, { secret = false } = {}) {
       <button class="btn sm" type="button" data-copy-value="${value}" ${secret ? 'data-secret="1"' : ""}>${icon("copy")} Copy</button></div></div>`;
 }
 
-export async function mountAutoCheckPanel(el, group) {
+export async function mountAutoCheckPanel(el, group, { allowed = true, onUpgrade } = {}) {
   mount(el, html`<div class="skeleton sk-card" style="height:90px"></div>`);
   let status;
   try { status = await rpc("collector_status", { p_group_id: group.id }); }
   catch (err) { mount(el, html`<p class="muted">Couldn't load automatic checking.</p>`); toastError(err); return; }
 
   const draw = (token = null) => {
+    if (!allowed && !status.active) {
+      mount(el, html`<div class="card"><div class="row between wrap" style="gap:12px"><div><h3 style="margin:0">Automatic payment checking</h3>
+        <p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Members' payments are confirmed straight from your MoMo messages, with no hand-checking. Included in the Plus and Pro plans.</p></div>
+        <span class="badge">Plus</span></div>
+        ${onUpgrade ? html`<div class="actions" style="margin-top:12px"><button class="btn primary" type="button" data-go-upgrade>${icon("trend")} See plans</button></div>` : ""}</div>`);
+      return;
+    }
     mount(el, html`<div class="card">
       <div class="row between wrap" style="gap:12px"><div><h3 style="margin:0">Automatic payment checking</h3>
         <p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Optional. Members' “I've paid” claims are confirmed by your own MoMo messages, so nobody can claim money you never received.</p></div>
@@ -61,6 +68,7 @@ export async function mountAutoCheckPanel(el, group) {
     </div>`);
   };
   draw();
+  on(el, "click", "[data-go-upgrade]", () => onUpgrade?.());
 
   on(el, "click", "[data-toggle-name]", async (_, b) => {
     setBusy(b, true, "Saving…");

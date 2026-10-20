@@ -87,3 +87,26 @@ drop function if exists public.delete_game(uuid);
 drop function if exists public.list_games(uuid);
 drop function if exists public.set_auto_by_name(uuid, boolean);
 drop function if exists private.auto_match_group(uuid);
+
+-- 010_plans.sql (tables hold plans and requests, so they are kept; limits stop being enforced)
+drop trigger if exists squadvault_member_limit on public.group_members;
+drop trigger if exists squadvault_event_limit on public.events;
+drop trigger if exists squadvault_photo_limit on public.group_photos;
+drop trigger if exists squadvault_autocheck_feature on public.momo_collectors;
+drop function if exists private.enforce_member_limit();
+drop function if exists private.enforce_event_limit();
+drop function if exists private.enforce_photo_limit();
+drop function if exists private.enforce_autocheck_feature();
+drop function if exists public.plan_overview(uuid);
+drop function if exists public.request_plan_upgrade(uuid, text, text, text);
+drop function if exists public.cancel_plan_request(uuid);
+drop function if exists public.owner_summary();
+drop function if exists public.owner_list_plan_requests();
+drop function if exists public.owner_decide_plan_request(uuid, boolean, text);
+drop function if exists public.owner_set_plan(uuid, text, integer);
+
+-- 011 email verification
+drop trigger if exists squadvault_verified_chat on public.group_messages;
+drop trigger if exists squadvault_verified_photos on public.group_photos;
+drop function if exists private.require_verified_email();
+drop function if exists public.confirm_my_email();

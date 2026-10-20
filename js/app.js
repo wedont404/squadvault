@@ -83,7 +83,11 @@ async function boot() {
     if (r.ok) {
       session = (await supabase.auth.getSession()).data.session;
       if (link.type === "recovery") { inRecovery = true; renderAuth(app, { mode: "recovery" }); clearAuthLink(); return; }
-      toast("Email confirmed. Welcome to SquadVault!", "success");
+      if (link.type === "magiclink" || link.type === "email") {
+        // The link proved the person owns this address: record it so chat and photos unlock.
+        try { const { error: ce } = await supabase.rpc("confirm_my_email"); if (ce) throw ce; toast("Email confirmed. You can chat and share photos now.", "success"); history.replaceState(null, "", `${location.pathname}#/squad`); }
+        catch { toast("Signed in, but we couldn't record the confirmation. Try the link again.", "error"); }
+      } else toast("Email confirmed. Welcome to SquadVault!", "success");
     } else {
       inRecovery = false;
       linkNotice = LINK_NOTICES.expired;
@@ -254,6 +258,7 @@ function defineRoutes() {
   defineRoute("/groups/:id", lazy("./groups.js", "renderGroupDetail"), { nav: "groups", title: "Group" });
   defineRoute("/events", lazy("./events.js", "renderEvents"), { nav: "events", title: "Events" });
   defineRoute("/events/:id", lazy("./events.js", "renderEventDetail"), { nav: "events", title: "Event" });
+  defineRoute("/owner", lazy("./owner.js", "renderOwner"), { nav: "settings", title: "Owner" });
   defineRoute("/squad", lazy("./hub.js", "renderHub"), { nav: "squad", title: "Squad" });
   defineRoute("/contributions", lazy("./contributions.js", "renderContributions"), { nav: "contributions", title: "Contributions" });
   defineRoute("/expenses", lazy("./expenses.js", "renderExpenses"), { nav: "expenses", title: "Expenses" });

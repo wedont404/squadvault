@@ -70,6 +70,7 @@ export async function renderSettings({ outlet }) {
         <button class="btn primary" type="submit">Update password</button>
       </form>
       <div class="stack">
+        <div data-owner></div>
         <div class="card stack"><h3>Sessions</h3>
           <p class="muted" style="font-size:var(--fs-sm)">Signed in as ${state.user.email}.</p>
           <div class="actions"><button class="btn" type="button" data-signout>${icon("logout")} Sign out</button>
@@ -101,5 +102,10 @@ export async function renderSettings({ outlet }) {
       toast("Password updated.", "success");
     } catch (err) { toastError(err); }
     setBusy(btn, false);
+  });
+  import("./data.js").then(async (d) => {
+    const o = await d.fetchOwnerSummary();
+    const slot = outlet.querySelector("[data-owner]");
+    if (o?.is_owner && slot) slot.innerHTML = `<div class="card stack"><h3>Owner</h3><p class="muted" style="font-size:var(--fs-sm)">${o.pending} plan upgrade request${o.pending === 1 ? "" : "s"} waiting.</p><div class="actions"><a class="btn primary" href="#/owner">Open owner page</a></div></div>`;
   });
 }

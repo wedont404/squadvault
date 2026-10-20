@@ -134,7 +134,8 @@ export async function renderGroupDetail({ outlet, params, isCurrent }) {
           <div class="section"><div class="section-head"><h2>Members</h2>${admin ? html`<button class="btn sm primary" type="button" data-add-member>${icon("plus")} Add member</button>` : ""}</div>
             <div class="card flush"><div class="list">${members.map((m) => memberRow(m, { admin, me: state.user.id }))}</div></div></div>
 
-          ${manager ? html`<div class="section"><div class="section-head"><h2>Invitations</h2></div><div data-invites></div></div>
+          ${manager ? html`<div class="section"><div class="section-head"><h2>Plan</h2></div><div data-plan></div></div>
+            <div class="section"><div class="section-head"><h2>Invitations</h2></div><div data-invites></div></div>
             <div class="section"><div class="section-head"><h2>Payment checking</h2></div><div data-autocheck></div></div>` : ""}
 
           <div class="grid cols-2 section" style="align-items:start">
@@ -150,7 +151,10 @@ export async function renderGroupDetail({ outlet, params, isCurrent }) {
 
         if (manager) {
           mountInvitationPanel($("[data-invites]", view), groupId);
-          import("./autocheck.js").then((m) => m.mountAutoCheckPanel($("[data-autocheck]", view), group));
+          import("./plans.js").then(async (pl) => {
+            const ov = await pl.mountPlanPanel($("[data-plan]", view), group, { onChange: () => draw() });
+            import("./autocheck.js").then((m) => m.mountAutoCheckPanel($("[data-autocheck]", view), group, { allowed: ov ? ov.limits.auto_check : true, onUpgrade: () => $("[data-upgrade]", view)?.click() }));
+          });
         }
 
         on(view, "click", "[data-make-current]", () => { setActiveGroup(groupId); toast(`Now viewing ${group.name}.`, "success"); draw(); });

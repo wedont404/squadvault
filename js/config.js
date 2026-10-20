@@ -19,6 +19,8 @@ export const config = Object.freeze({
   onlinePayments: false,
   // Optional public contact shown in the Terms. Leave empty to hide it.
   contactEmail: "",
+  // Where group leaders send the payment for a paid plan (YOUR MoMo). Fill both to switch upgrades on.
+  billing: Object.freeze({ momoNumber: "", momoName: "", contact: "" }),
   limits: Object.freeze({
     minContribution: 100,
     maxContribution: 5_000_000,

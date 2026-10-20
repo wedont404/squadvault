@@ -9,6 +9,7 @@ Supabase dashboard -> **Authentication -> Email Templates**
 |---|---|---|
 | Confirm signup | Confirm your SquadVault account | `confirm-signup.html` |
 | Reset password | Reset your SquadVault password | `reset-password.html` |
+| Magic Link | Confirm your email on SquadVault | `magic-link.html` (sent when someone taps *Send confirmation email* to unlock chat and photos) |
 
 Paste only the HTML (not the first comment) and Save. These links use `token_hash`, which SquadVault turns into a login
 by itself, so they work even when the email is opened in a different browser or in a phone's mail app.

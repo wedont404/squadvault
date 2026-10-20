@@ -194,6 +194,36 @@ This is the default way to collect. `config.onlinePayments` is `false`, so the I
 Unverified: the USSD shortcut formats. `*182*1*1*<number>*<amount>#` is the format supplied by the project owner; the merchant-code format `*182*8*1*<code>*<amount>#` and Airtel's `*500#` menu are not confirmed. Test them with a small amount on a real phone. If a shortcut fails, the page tells the member to dial `*182#` and enter the number manually.
 
 
+## Confirm email later (update 011)
+
+Sign-up is instant: nobody waits for an email. Turn **Confirm email OFF** in Supabase (Authentication -> Sign In / Providers -> Email).
+Chatting and sharing photos need a confirmed email. On the Squad page people see a banner with **Send confirmation email**; the link in it confirms them and brings them back to Squad. Reading chat stays open to everyone.
+
+1. Run `supabase/SQUADVAULT_UPDATE_011.sql` (existing accounts are treated as confirmed).
+2. Supabase -> Authentication -> Email Templates -> **Magic Link**: paste `supabase/email-templates/magic-link.html`, subject "Confirm your email on SquadVault".
+3. Authentication -> URL Configuration: Site URL `https://wedont404.github.io/squadvault/`, add the same as a Redirect URL.
+4. Strongly recommended: custom SMTP (see email-templates/README.md). The built-in sender only allows a few emails per hour.
+
+## Plans and making money (update 010)
+
+Members are always free. Each **group** is on Free, Plus or Pro:
+
+| | Free | Plus (2,000 RWF/month, 20,000/year) | Pro (10,000/month, 100,000/year) |
+|---|---|---|---|
+| Members | 15 | 150 | 1,000 |
+| Active events | 2 | unlimited | unlimited |
+| Photos on the wall | 30 | 500 | 5,000 |
+| Automatic MoMo checking | no | yes | yes |
+
+Prices and limits live in the `plans` table; edit them in the Supabase Table Editor any time. Limits are enforced in the database (triggers), only when something new is added. Nothing that exists is deleted when a plan ends. Existing groups got Plus free for 60 days when you ran update 010.
+
+**Set up (once)**
+1. Run `supabase/SQUADVAULT_UPDATE_010.sql`.
+2. Make yourself the owner (SQL Editor): `insert into public.platform_admins (user_id) select id from auth.users where email = 'YOUR@EMAIL';`
+3. In `js/config.js` fill `billing.momoNumber` and `billing.momoName` with YOUR MoMo, and `billing.contact` (WhatsApp or email) so groups know how to reach you. Until `momoNumber` is filled, the Upgrade button says upgrades aren't switched on.
+
+**How a sale works**: a group admin taps *Upgrade*, sends the price to your MoMo, enters the transaction ID. You see it on the dashboard and in *Settings > Owner*. Check your MoMo messages for that ID and amount, then Approve. The plan switches on and renews from its end date. You can also grant a plan by hand: `select public.owner_set_plan('<group id>', 'plus', 30);` (run while signed in as the owner through the app, or as the database owner use an `update public.savings_groups set plan = 'plus', plan_until = now() + interval '30 days' where id = '<group id>'`).
+
 ## Squad extras, sender-name checks and returns (update 009)
 
 Run `supabase/SQUADVAULT_UPDATE_009.sql` once in the Supabase SQL Editor (it is also in `SQUADVAULT_ALL_IN_ONE.sql` for new setups). It needs 007 and 008 first.

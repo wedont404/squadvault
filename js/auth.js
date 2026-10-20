@@ -5,7 +5,7 @@ import { html, isEmail, passwordProblem } from "./utils.js";
 import { icon, field, mount, on, setBusy, setFieldError, clearFieldErrors, formMessage, formMsgSlot, formData, siteFooter, $ } from "./ui.js";
 import { TERMS_VERSION } from "./terms.js";
 
-const redirectUrl = () => `${location.origin}${location.pathname}`;
+export const redirectUrl = () => `${location.origin}${location.pathname}`;
 
 // ---------------------------------------------------------------------------
 // Session lifecycle
@@ -282,4 +282,21 @@ function wire(root) {
       setBusy(btn, false);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Deferred email confirmation (needed for chat and photos only)
+// ---------------------------------------------------------------------------
+let verifyCoolUntil = 0;
+/** Sends a one-time sign-in link to the signed-in person's own email. Resolves { ok, wait?, error? }. */
+export async function sendVerifyEmail(email) {
+  const left = Math.ceil((verifyCoolUntil - Date.now()) / 1000);
+  if (left > 0) return { ok: false, wait: left };
+  const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: redirectUrl() } });
+  if (error) {
+    if (error.status === 429 || /rate|limit/i.test(`${error.code} ${error.message}`)) verifyCoolUntil = Date.now() + 90000;
+    return { ok: false, error };
+  }
+  verifyCoolUntil = Date.now() + 60000;
+  return { ok: true };
 }

@@ -4,7 +4,7 @@ import { supabase, must, rpc } from "./supabase.js";
 import { toInt } from "./utils.js";
 
 export async function fetchProfile(uid) {
-  const data = must(await supabase.from("profiles").select("id,display_name,avatar_path").eq("id", uid).maybeSingle());
+  const data = must(await supabase.from("profiles").select("id,display_name,avatar_path,email_verified_at").eq("id", uid).maybeSingle());
   return data ?? { id: uid, display_name: "Member", avatar_path: null };
 }
 
@@ -205,4 +205,13 @@ export async function fetchGames(groupId) {
     creator: nm(g.created_by),
     top: (g.top ?? []).map((t) => ({ ...t, guess: toInt(t.guess), diff: toInt(t.diff), name: nm(t.user_id) })),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Plans
+// ---------------------------------------------------------------------------
+export const fetchPlanOverview = (groupId) => rpc("plan_overview", { p_group_id: groupId });
+/** { is_owner, pending } . Never throws: ordinary users simply get is_owner false. */
+export async function fetchOwnerSummary() {
+  try { return (await rpc("owner_summary")) ?? { is_owner: false }; } catch { return { is_owner: false }; }
 }
