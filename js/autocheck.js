@@ -37,11 +37,16 @@ export async function mountAutoCheckPanel(el, group) {
         ${copyRow("4. Body (JSON)", bodyTemplate(token), { secret: true })}
         <p class="muted" style="font-size:var(--fs-sm)">In the body, replace <code class="code-inline">{{SMS_TEXT}}</code> with whatever your forwarder app calls “message text”.</p></div>` : ""}
 
+      ${status.active ? html`<div class="row between wrap" style="margin-top:14px;gap:10px;padding:12px 14px;border:1px solid var(--border-soft);border-radius:var(--r-sm)">
+        <div style="min-width:220px;flex:1"><strong>Also check the sender's name</strong>
+          <div class="muted" style="font-size:var(--fs-sm);margin-top:2px">When a member gives no transaction ID, their claim is confirmed if the MoMo message has the <em>same amount</em>, a <em>matching sender name</em>, arrived around the same time, and only one claim fits it. Every new message re-checks waiting claims. Unclear cases stay with you.</div></div>
+        <button class="btn sm ${status.auto_by_name ? "" : "primary"}" type="button" data-toggle-name>${status.auto_by_name ? "Turn off" : "Turn on"}</button></div>` : ""}
+
       ${status.active || token ? html`<ol class="steps" style="margin-top:14px">
         <li>Use the phone that receives your MoMo “you have received” messages. This needs <strong style="color:var(--text)">Android</strong>. iPhones can't forward SMS automatically.</li>
         <li>Install an SMS-forwarder app that can send an HTTP request with custom headers and a JSON body, then create a rule that forwards <strong style="color:var(--text)">only messages from your mobile money provider</strong> using the four values above.</li>
         <li>Keep the app allowed to run in the background, then send yourself a small payment. “Last message received” above should update.</li>
-        <li>Paste a real message below to check we read it correctly. Only the amount, the transaction ID and the sender's name are kept. The message itself is never saved.</li></ol>
+        <li>Paste a real message below to check we read it correctly. Only the amount, the transaction ID and the sender's name are kept. The message itself is never saved. The sender's name is what lets payments without an ID be matched.</li></ol>
 
         <div class="stack" style="margin-top:12px"><label class="label" for="sms-test" style="font-size:var(--fs-sm);color:var(--muted)">Test a sample MoMo message (nothing is saved)</label>
           <textarea class="input" id="sms-test" rows="3" maxlength="1000" placeholder="Paste a “You have received …” message here"></textarea>
@@ -57,6 +62,15 @@ export async function mountAutoCheckPanel(el, group) {
   };
   draw();
 
+  on(el, "click", "[data-toggle-name]", async (_, b) => {
+    setBusy(b, true, "Saving…");
+    try {
+      await rpc("set_auto_by_name", { p_group_id: group.id, p_on: !status.auto_by_name });
+      status = await rpc("collector_status", { p_group_id: group.id });
+      draw();
+      toast(status.auto_by_name ? "Name matching is on." : "Name matching is off. Only transaction IDs confirm automatically.", "success");
+    } catch (err) { toastError(err); setBusy(b, false); }
+  });
   on(el, "click", "[data-copy-value]", async (_, b) => { if (await copyText(b.dataset.copyValue)) toast("Copied.", "success"); });
   const make = async (b) => {
     setBusy(b, true, "Creating…");

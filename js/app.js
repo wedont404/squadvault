@@ -7,6 +7,7 @@ import { state, setState, subscribe, chooseActiveGroup, setActiveGroup, resetSta
 import { fetchProfile, fetchGroups } from "./data.js";
 import { $, $$, mount, on, icon, avatar, toast, siteFooter } from "./ui.js";
 import { html, str } from "./utils.js";
+import { watchImages } from "./media.js";
 
 const app = document.getElementById("app");
 let sessionUid = null;   // guards against handling the same session twice (INITIAL_SESSION + getSession)
@@ -30,13 +31,14 @@ const NAV = [
   ["dashboard", "Dashboard", "home"],
   ["groups", "My Groups", "users"],
   ["events", "Events", "calendar"],
+  ["squad", "Squad", "chat"],
   ["contributions", "Contributions", "wallet"],
   ["expenses", "Expenses", "receipt"],
   ["invitations", "Invitations", "ticket"],
   ["profile", "Profile", "user"],
   ["settings", "Settings", "settings"],
 ];
-const BOTTOM = ["dashboard", "groups", "contributions", "events"];
+const BOTTOM = ["dashboard", "events", "squad", "contributions"];
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -132,6 +134,7 @@ async function handleSession(session) {
     setState({ profile, groups });
     chooseActiveGroup();
     renderShell();
+    watchImages(document.body);
   } catch (err) {
     console.error(err);
     sessionUid = null;
@@ -251,6 +254,7 @@ function defineRoutes() {
   defineRoute("/groups/:id", lazy("./groups.js", "renderGroupDetail"), { nav: "groups", title: "Group" });
   defineRoute("/events", lazy("./events.js", "renderEvents"), { nav: "events", title: "Events" });
   defineRoute("/events/:id", lazy("./events.js", "renderEventDetail"), { nav: "events", title: "Event" });
+  defineRoute("/squad", lazy("./hub.js", "renderHub"), { nav: "squad", title: "Squad" });
   defineRoute("/contributions", lazy("./contributions.js", "renderContributions"), { nav: "contributions", title: "Contributions" });
   defineRoute("/expenses", lazy("./expenses.js", "renderExpenses"), { nav: "expenses", title: "Expenses" });
   defineRoute("/invitations", lazy("./invitations.js", "renderInvitations"), { nav: "invitations", title: "Invitations" });

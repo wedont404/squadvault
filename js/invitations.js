@@ -1,5 +1,5 @@
 // Invitations: generate / copy / revoke codes (admins & treasurers) and join with a code (anyone).
-// The plaintext code is shown exactly once, when created. Only a SHA-256 hash is stored server-side.
+// Leaders (admins & treasurers) can read their group's active code again. Joining checks a SHA-256 hash.
 import { activeGroup, isManagerRole } from "./state.js";
 import { rpc, friendlyError } from "./supabase.js";
 import { reloadGroups } from "./session.js";
@@ -54,20 +54,34 @@ export async function mountInvitationPanel(host, groupId) {
     skeleton: skeletonList(2),
     load: () => rpc("list_invitations", { p_group_id: groupId }),
     render: (rows) => {
+      const active = rows.filter((r) => r.status === "active");
+      const current = active.find((r) => r.code) ?? null;      // newest active code we can still read
+      const oldActive = active.filter((r) => !r.code);         // made before codes became viewable
+      const others = rows.filter((r) => r.status !== "active" || (!r.code && r.status === "active"));
       mount(host, html`<div class="card stack">
-        <form class="row wrap" data-gen novalidate style="align-items:flex-end">
-          <div class="field" style="width:130px"><label for="inv-uses">Max uses</label><input class="input" id="inv-uses" name="uses" type="number" min="1" max="100" value="10" inputmode="numeric"></div>
-          <div class="field" style="width:130px"><label for="inv-days">Valid for (days)</label><input class="input" id="inv-days" name="days" type="number" min="1" max="30" value="7" inputmode="numeric"></div>
-          <button class="btn primary" type="submit">${icon("plus")} Generate code</button></form>
+        ${current
+          ? html`<div class="stack" style="gap:10px"><div><h3 style="margin:0">Your invitation code</h3>
+              <p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Share this one. It stays here until it expires or is used up, so there's no need to make a new code each time.</p></div>
+              <div class="code-box"><span data-code>${current.code}</span><button class="btn sm" type="button" data-copy-code="${current.code}">${icon("copy")} Copy</button></div>
+              <div class="row wrap" style="gap:8px"><a class="btn sm" data-wa href="${waLink(current.code)}" target="_blank" rel="noopener">${icon("link")} Share on WhatsApp</a>
+                <span class="muted" style="font-size:var(--fs-sm)">${current.use_count} of ${current.max_uses} used · ${relativeExpiry(current.expires_at)}</span>
+                <button class="btn sm danger" type="button" data-revoke="${current.id}" style="margin-left:auto">Revoke</button></div></div>`
+          : html`<div><h3 style="margin:0">No active code yet</h3><p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Make one and it will stay visible here so you can copy it any time.</p></div>`}
+        <details ${current ? "" : "open"} class="more"><summary class="link-btn" style="cursor:pointer">${current ? "Need a different code? Make another" : "Make a code"}</summary>
+          <form class="row wrap" data-gen novalidate style="align-items:flex-end;margin-top:12px">
+            <div class="field" style="width:130px"><label for="inv-uses">Max uses</label><input class="input" id="inv-uses" name="uses" type="number" min="1" max="100" value="10" inputmode="numeric"></div>
+            <div class="field" style="width:130px"><label for="inv-days">Valid for (days)</label><input class="input" id="inv-days" name="days" type="number" min="1" max="30" value="7" inputmode="numeric"></div>
+            <button class="btn primary" type="submit">${icon("plus")} Generate code</button></form></details>
         <div data-msg></div>
-        ${rows.length
-          ? html`<div class="list" style="margin:0 -24px -24px">${rows.map((r) => html`<div class="list-item">
+        ${oldActive.length ? html`<p class="faint" style="font-size:var(--fs-xs)">${oldActive.length} older active code${oldActive.length === 1 ? " was" : "s were"} made before codes could be viewed. They still work, but can't be shown again. Revoke them below if you don't know who has them.</p>` : ""}
+        ${others.length
+          ? html`<div class="list" style="margin:0 -24px -24px">${others.map((r) => html`<div class="list-item">
               <span class="avatar" aria-hidden="true" style="background:var(--surface-3);color:var(--green)">${icon("ticket")}</span>
               <div class="grow"><div class="title">${r.use_count} of ${r.max_uses} used</div>
-                <div class="sub">${r.status === "active" ? relativeExpiry(r.expires_at) : `Created ${formatDate(r.created_at)}`} · codes are hidden after creation</div></div>
+                <div class="sub">${r.status === "active" ? relativeExpiry(r.expires_at) : `Created ${formatDate(r.created_at)}`}${r.status === "active" ? " · can't be shown again" : ""}</div></div>
               ${badge(r.status)}
               ${r.status === "active" ? html`<button class="btn sm danger" type="button" data-revoke="${r.id}">Revoke</button>` : ""}</div>`)}</div>`
-          : html`<p class="muted">No invitations yet. Generate one and share it privately.</p>`}
+          : ""}
       </div>`);
 
       const form = $("form[data-gen]", host);
@@ -80,10 +94,14 @@ export async function mountInvitationPanel(host, groupId) {
         const btn = $('button[type="submit"]', form);
         setBusy(btn, true, "Generating…");
         try {
-          const inv = await rpc("create_invitation_code", { p_group_id: groupId, p_max_uses: uses, p_valid_days: days });
-          showCode(inv);
+          await rpc("create_invitation_code", { p_group_id: groupId, p_max_uses: uses, p_valid_days: days });
+          toast("New code ready. It's shown above.", "success");
           draw();
         } catch (err) { formMessage(host, "error", friendlyError(err)); setBusy(btn, false); }
+      });
+      on(host, "click", "[data-copy-code]", async (_, b) => {
+        const ok = await copyText(b.dataset.copyCode);
+        toast(ok ? "Code copied." : "Couldn't copy automatically. Select and copy it.", ok ? "success" : "info");
       });
       on(host, "click", "[data-revoke]", async (_, b) => {
         if (!(await confirmDialog({ title: "Revoke this invitation?", message: "Nobody will be able to join with it anymore. People who already joined stay in the group.", confirmLabel: "Revoke", danger: true }))) return;
@@ -95,22 +113,7 @@ export async function mountInvitationPanel(host, groupId) {
   await draw();
 }
 
-function showCode(inv) {
-  const m = openModal({
-    title: "Invitation ready",
-    content: html`<div class="stack">
-      <p class="muted">Copy it now. For your security the code is <strong>never shown again</strong>.</p>
-      <div class="code-box"><span data-code>${inv.code}</span><button class="btn sm" type="button" data-copy>${icon("copy")} Copy</button></div>
-      <p class="muted" style="font-size:var(--fs-sm)">Up to ${inv.max_uses} people can use it · ${relativeExpiry(inv.expires_at)}.</p></div>`,
-    footer: html`<button class="btn primary" type="button" data-done>Done</button>`,
-  });
-  $("[data-copy]", m.el).addEventListener("click", async (e) => {
-    const ok = await copyText(inv.code);
-    toast(ok ? "Code copied." : "Couldn't copy automatically. Select and copy it.", ok ? "success" : "info");
-    if (ok) e.currentTarget.innerHTML = "Copied";
-  });
-  $("[data-done]", m.el).addEventListener("click", () => m.close());
-}
+const waLink = (code) => `https://wa.me/?text=${encodeURIComponent(`Join our savings group on SquadVault. Open ${location.origin}${location.pathname} , sign up, then choose “Join with a code” and enter: ${code}`)}`;
 
 // ---------------------------------------------------------------------------
 // Page

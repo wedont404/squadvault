@@ -108,26 +108,27 @@ function shell(card) {
   </div>`;
 }
 
-export function renderAuth(root, { mode = "signin", notice = null } = {}) {
+export function renderAuth(root, { mode = "signin", notice = null, prefill = "", resend = "" } = {}) {
   const modes = {
     signin: renderSignIn,
     signup: renderSignUp,
     forgot: renderForgot,
     recovery: renderRecovery,
   };
-  (modes[mode] ?? renderSignIn)(root, notice);
+  (modes[mode] ?? renderSignIn)(root, notice, { prefill, resend });
 }
 
 function noticeBox(notice) {
   return notice ? html`<div class="form-msg ${notice.type ?? "info"}" role="status">${notice.text}</div>` : "";
 }
 
-function renderSignIn(root, notice) {
+function renderSignIn(root, notice, { prefill = "", resend = "" } = {}) {
   mount(root, shell(html`<div class="auth-card">
     <div><p class="eyebrow">Welcome back</p><h1>Sign in</h1></div>
     ${noticeBox(notice)}
+    ${resend ? html`<div class="row" style="gap:10px;align-items:center"><button class="btn sm" type="button" data-resend="${resend}">${icon("refresh")} Resend confirmation email</button><span class="faint" style="font-size:var(--fs-xs)" data-resend-msg></span></div>` : ""}
     <form class="form" novalidate data-form="signin">
-      ${field({ name: "email", label: "Email", type: "email", autocomplete: "email", placeholder: "you@example.com" })}
+      ${field({ name: "email", label: "Email", type: "email", autocomplete: "email", placeholder: "you@example.com", value: prefill })}
       ${field({ name: "password", label: "Password", type: "password", autocomplete: "current-password" })}
       ${formMsgSlot()}
       <button class="btn primary block" type="submit">Sign in</button>
@@ -187,8 +188,27 @@ function renderRecovery(root) {
 // ---------------------------------------------------------------------------
 // Form wiring
 // ---------------------------------------------------------------------------
+// A short pause after the email service says "busy", so people don't keep pressing and make it worse.
+let coolUntil = 0;
+const waitLeft = () => Math.max(0, Math.ceil((coolUntil - Date.now()) / 1000));
+
 function wire(root) {
   on(root, "click", "[data-go]", (_, b) => renderAuth(root, { mode: b.dataset.go }));
+  on(root, "click", "[data-resend]", async (_, b) => {
+    const msg = $("[data-resend-msg]", root);
+    if (waitLeft() > 0) { if (msg) msg.textContent = `Please wait ${waitLeft()}s first.`; return; }
+    setBusy(b, true, "Sending…");
+    try {
+      const { error } = await supabase.auth.resend({ type: "signup", email: b.dataset.resend, options: { emailRedirectTo: redirectUrl() } });
+      if (error) throw error;
+      coolUntil = Date.now() + 60000;
+      if (msg) msg.textContent = "Sent. It can take a minute to arrive.";
+    } catch (err) {
+      if (/rate|busy|429/i.test(`${err.code} ${err.status} ${err.message}`)) coolUntil = Date.now() + 90000;
+      if (msg) msg.textContent = friendlyError(err);
+    }
+    setBusy(b, false);
+  });
   const form = $("form[data-form]", root);
   if (!form) return;
   form.addEventListener("submit", async (e) => {
@@ -197,6 +217,11 @@ function wire(root) {
     const kind = form.dataset.form;
     const v = formData(form);
     const btn = $('button[type="submit"]', form);
+    if (btn?.disabled) return; // already sending: a second tap must not send a second email
+    if ((kind === "signup" || kind === "forgot") && waitLeft() > 0) {
+      formMessage(form, "warn", `The email service is busy. Please wait ${waitLeft()} seconds, then try again.`);
+      return;
+    }
     const bad = (name, msg) => { setFieldError(form, name, msg); $(`#f-${name}`, form)?.focus(); return true; };
 
     try {
@@ -205,7 +230,13 @@ function wire(root) {
         if (!v.password) return bad("password", "Enter your password.");
         setBusy(btn, true, "Signing in…");
         const { error } = await supabase.auth.signInWithPassword({ email: v.email.trim(), password: v.password });
-        if (error) throw error; // success is picked up by onAuthStateChange
+        if (error) {
+          if (error.code === "email_not_confirmed" || /email not confirmed/i.test(error.message ?? "")) {
+            renderAuth(root, { mode: "signin", prefill: v.email.trim(), resend: v.email.trim(), notice: { type: "warn", text: "Your email isn't confirmed yet. Open the link we emailed you, or tap Resend to get a new one." } });
+            return;
+          }
+          throw error;
+        } // success is picked up by onAuthStateChange
       } else if (kind === "signup") {
         const name = v.display_name.trim();
         if (name.length < 1 || name.length > 60) return bad("display_name", "Use 1 to 60 characters.");
@@ -221,7 +252,12 @@ function wire(root) {
         });
         if (error) throw error;
         if (!data.session) {
-          renderAuth(root, { mode: "signin", notice: { type: "ok", text: "Account created. Check your inbox and confirm your email, then sign in." } });
+          // With email confirmation on, Supabase answers an already-registered email with a "fake" user that
+          // has no identities and sends nothing. Tell the person the truth instead of waiting for an email.
+          const existing = Array.isArray(data.user?.identities) && data.user.identities.length === 0;
+          renderAuth(root, existing
+            ? { mode: "signin", prefill: v.email.trim(), notice: { type: "warn", text: "That email already has a SquadVault account, so no new email was sent. Sign in below, or use “Forgot password?” if you don't remember it." } }
+            : { mode: "signin", prefill: v.email.trim(), resend: v.email.trim(), notice: { type: "ok", text: "Account created. We sent a confirmation link to your email. Open it (check spam too), then sign in. No email after a few minutes? Tap Resend." } });
         }
       } else if (kind === "forgot") {
         if (!isEmail(v.email)) return bad("email", "Enter a valid email address.");
@@ -240,6 +276,7 @@ function wire(root) {
         window.dispatchEvent(new CustomEvent("sv:recovery-done"));
       }
     } catch (err) {
+      if (/over_email_send_rate_limit|over_request_rate_limit/.test(String(err?.code)) || err?.status === 429) coolUntil = Date.now() + 60000;
       formMessage(form, "error", friendlyError(err));
     } finally {
       setBusy(btn, false);

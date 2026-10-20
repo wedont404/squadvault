@@ -322,6 +322,7 @@ $$;
 --   strength 'id'     = same transaction ID (the amount may differ: the app flags that)
 --   strength 'amount' = same amount, received around the time of the claim (a suggestion only)
 -- ---------------------------------------------------------------------------
+drop function if exists public.claim_match_hints(uuid);
 create or replace function public.claim_match_hints(p_event_id uuid)
 returns table (
   contribution_id uuid,

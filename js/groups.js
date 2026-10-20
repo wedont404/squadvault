@@ -12,7 +12,7 @@ import {
 import { contributionRow, expenseRow, activityRows, openReceipt } from "./components.js";
 import { openCreateEventDialog } from "./events.js";
 import { mountInvitationPanel } from "./invitations.js";
-import { openAddMemberDialog } from "./momo.js";
+import { openAddMemberDialog, returnsAlert } from "./momo.js";
 
 // ---------------------------------------------------------------------------
 // Create group
@@ -121,6 +121,8 @@ export async function renderGroupDetail({ outlet, params, isCurrent }) {
             ${statCard({ label: "Spent", value: formatRWF(sum(f, (x) => x.expenses_total)), hint: "Recorded expenses", tone: "violet", iconName: "receipt" })}
             ${statCard({ label: "Available", value: formatRWF(sum(f, (x) => x.available_funds)), hint: "Verified − expenses", tone: "cyan", iconName: "wallet" })}
           </div>
+
+          ${manager ? returnsAlert(events, fin) : ""}
 
           <div class="section"><div class="section-head"><h2>Events</h2>
             ${manager ? html`<button class="btn sm primary" type="button" data-new-event>${icon("plus")} New event</button>` : ""}</div>

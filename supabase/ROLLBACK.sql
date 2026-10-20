@@ -71,3 +71,19 @@ drop function if exists public.ingest_momo_sms(text, text);
 drop function if exists public.claim_match_hints(uuid);
 drop function if exists public.confirm_with_receipt(uuid, uuid);
 drop function if exists private.parse_momo_sms(text);
+
+-- 009_community.sql (tables hold members' chat, photos and game entries, so they are kept; functions are removed)
+drop function if exists public.set_event_cover(uuid, text);
+drop function if exists public.add_group_photo(uuid, text, text, uuid);
+drop function if exists public.delete_group_photo(uuid);
+drop function if exists public.toggle_photo_like(uuid);
+drop function if exists public.list_group_photos(uuid, integer);
+drop function if exists public.post_group_message(uuid, text);
+drop function if exists public.delete_group_message(uuid);
+drop function if exists public.create_game(uuid, text, text, text[]);
+drop function if exists public.play_game(uuid, integer, bigint);
+drop function if exists public.close_game(uuid, bigint);
+drop function if exists public.delete_game(uuid);
+drop function if exists public.list_games(uuid);
+drop function if exists public.set_auto_by_name(uuid, boolean);
+drop function if exists private.auto_match_group(uuid);

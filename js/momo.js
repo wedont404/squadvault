@@ -9,6 +9,7 @@ import {
   field, formData, formMessage, formMsgSlot, setFieldError, clearFieldErrors, progressBar, emptyState,
 } from "./ui.js";
 import { methodLabel } from "./components.js";
+import { state, groupById, isManagerRole } from "./state.js";
 
 const NET = { mtn_momo: "MTN", airtel_money: "Airtel" };
 
@@ -109,22 +110,24 @@ export async function dialWithNotice(ussd) {
 }
 
 export function claimForm() {
+  const myName = state.profile?.display_name ?? "";
   return html`<form class="form" data-claim novalidate>
-    <div><h4 style="margin:0">After you have paid</h4><p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Tell the group leader. It counts once they confirm it.</p></div>
-    ${field({ name: "txn", label: "MoMo transaction ID (optional)", placeholder: "From the confirmation SMS", required: false, attrs: 'maxlength="20" autocapitalize="characters"', help: "Optional. If you add it and the leader has automatic checking on, your payment is verified straight away. Without it, the leader confirms by hand." })}
+    <div><h4 style="margin:0">After you have paid</h4><p class="muted" style="font-size:var(--fs-sm);margin-top:4px">Tell the group leader. It counts once the leader confirms it, or once it is matched automatically.</p></div>
+    ${field({ name: "sender", label: "Name on your MoMo account", value: myName, required: false, attrs: 'maxlength="60" autocomplete="name"', help: "Type your name the way MTN or Airtel shows it when you send money. The leader's phone gets a message with the sender's name, so a matching name and amount can confirm your payment by itself." })}
+    ${field({ name: "txn", label: "MoMo transaction ID (optional)", placeholder: "From the confirmation SMS", required: false, attrs: 'maxlength="20" autocapitalize="characters"', help: "Optional but fastest: with the ID and the right amount, your payment is verified straight away." })}
     ${formMsgSlot()}
     <button class="btn primary block" type="submit">${icon("check")} I've paid</button>
   </form>`;
 }
-
 export async function submitClaim(form, ev, amount) {
   clearFieldErrors(form);
   const txn = String(formData(form).txn ?? "").trim();
+  const sender = String(formData(form).sender ?? "").trim();
   if (txn && !/^[A-Za-z0-9]{6,20}$/.test(txn)) { setFieldError(form, "txn", "6 to 20 letters or numbers, or leave empty."); return null; }
   const btn = $('button[type="submit"]', form);
   setBusy(btn, true, "Sending…");
   try {
-    return await rpc("submit_payment_claim", { p_event_id: ev.id, p_amount: amount, p_txn_ref: txn || null });
+    return await rpc("submit_payment_claim", { p_event_id: ev.id, p_amount: amount, p_txn_ref: txn || null, p_sender_name: sender || null });
   } catch (err) {
     formMessage(form, "error", err.message);
     setBusy(btn, false);
@@ -209,7 +212,10 @@ export function claimsQueue(claims, hints = [], collectorActive = false) {
       if (best.strength === "id") {
         return html`<div class="form-msg error" style="margin-top:6px">${icon("alert")} A MoMo message with this ID says ${formatRWF(amt)}, not ${formatRWF(c.amount)}. Don't confirm until you've checked.</div>`;
       }
-      return html`<div class="form-msg info" style="margin-top:6px">Possible match: ${formatRWF(amt)}${who} · ${timeAgo(best.received_at)}. Confirm only if it is this person.</div>`;
+      if (best.strength === "name" && amt === c.amount) {
+        return html`<div class="form-msg ok" style="margin-top:6px">${icon("check")} A MoMo message with the same amount${who} arrived ${timeAgo(best.received_at)}. The sender name matches (${best.name_score}%). Safe to confirm if you recognise it.</div>`;
+      }
+      return html`<div class="form-msg info" style="margin-top:6px">Possible match: ${formatRWF(amt)}${who} · ${timeAgo(best.received_at)}${best.name_score ? ` · name ${best.name_score}% alike` : " · name doesn't match"}. Confirm only if it is this person.</div>`;
     }
     return collectorActive
       ? html`<div class="form-msg warn" style="margin-top:6px">${icon("alert")} No matching MoMo message has arrived yet. Don't confirm until it does.</div>`
@@ -220,7 +226,7 @@ export function claimsQueue(claims, hints = [], collectorActive = false) {
   return html`<div class="section"><div class="section-head"><h2>Waiting for your confirmation</h2></div>
     <div class="card flush"><div class="list">${claims.map((c) => html`<div class="list-item" style="flex-wrap:wrap">${avatar(c.name, c.avatar_path)}
       <div class="grow"><div class="title">${c.name} · ${formatRWF(c.amount)}</div>
-        <div class="sub">${methodLabel(c.payment_method)} · ${timeAgo(c.created_at)}${c.provider_ref ? ` · ID ${c.provider_ref}` : " · no transaction ID"}</div>${check(c)}</div>
+        <div class="sub">${methodLabel(c.payment_method)} · ${timeAgo(c.created_at)}${c.provider_ref ? ` · ID ${c.provider_ref}` : " · no transaction ID"}${c.sender_name ? ` · MoMo name “${c.sender_name}”` : ""}</div>${check(c)}</div>
       <div class="acts">${canUse(c) ? html`<button class="btn sm primary" type="button" data-confirm-receipt data-id="${c.id}" data-receipt="${canUse(c).receipt_id}" data-strength="${canUse(c).strength}">${icon("check")} Confirm with this message</button>` : ""}
         <button class="btn sm ${canUse(c) ? "" : "primary"}" type="button" data-review="paid" data-id="${c.id}">${icon("check")} Received</button>
         <button class="btn sm danger" type="button" data-review="failed" data-id="${c.id}">${icon("x")} Not received</button></div>
@@ -310,4 +316,101 @@ export function openAddMemberDialog(group, onDone) {
       onDone();
     } catch (err) { formMessage(form, "error", err.message); setBusy(btn, false); }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Returning money (leaders). The panel shows itself when it is relevant: a cancelled event that still holds
+// verified money, a completed event with money left over, or an event that collected more than its target.
+// SquadVault only RECORDS a return. The leader sends the money back from their own MoMo, outside the app.
+// ---------------------------------------------------------------------------
+const RETURN_REASONS = ["Event cancelled", "Collected more than needed", "Paid by mistake", "Other"];
+
+/** Which situation applies (or null). Pure: used by the panel and the dashboard alert. */
+export function returnSituation(event, fin) {
+  if (!event || !fin || !(fin.paid_total > 0)) return null;
+  if (event.status === "cancelled") return "cancelled";
+  if (event.status === "completed" && fin.available_funds > 0) return "leftover";
+  if (event.status === "active" && event.target_amount > 0 && fin.paid_total > event.target_amount) return "over";
+  return null;
+}
+
+export function returnsPanel(event, fin, contributions) {
+  const kind = returnSituation(event, fin);
+  if (!kind) return "";
+  const paid = contributions.filter((c) => c.status === "paid");
+  const sent = contributions.filter((c) => c.status === "refunded");
+  const sentTotal = sent.reduce((a, c) => a + c.amount, 0);
+  const extra = Math.max(fin.paid_total - event.target_amount, 0);
+  const head = {
+    cancelled: { tone: "warn", title: "This event was cancelled. Return the money to your members?", text: html`${formatRWF(fin.paid_total)} of verified money is still recorded here. Send each person's money back from your own MoMo, then tap <strong>Mark returned</strong> so everyone can see it was done.` },
+    leftover: { tone: "info", title: "Money is left over. Return it to your members?", text: html`${formatRWF(fin.available_funds)} is left after expenses. If you're giving it back, send it from your own MoMo and mark each payment as returned. If it will be used for something else, you can ignore this.` },
+    over: { tone: "info", title: "More was collected than the target", text: html`${formatRWF(extra)} above the target. You can keep collecting, or give a payment back and mark it returned below.` },
+  }[kind];
+  const rows = paid.map((c) => html`<div class="list-item" style="flex-wrap:wrap">${avatar(c.name, c.avatar_path)}
+      <div class="grow"><div class="title">${c.name} · ${formatRWF(c.amount)}</div>
+        <div class="sub">Paid ${timeAgo(c.paid_at ?? c.created_at)}${c.provider_ref ? ` · ID ${c.provider_ref}` : ""}${c.sender_name ? ` · MoMo name “${c.sender_name}”` : ""}${c.provider === "manual" ? "" : " · paid through the payment provider"}</div></div>
+      ${c.provider === "manual"
+        ? html`<button class="btn sm ${kind === "cancelled" ? "primary" : ""}" type="button" data-return="${c.id}" data-name="${c.name}" data-amount="${c.amount}">${icon("refresh")} Mark returned</button>`
+        : html`<span class="faint" style="font-size:var(--fs-xs)">Return outside SquadVault</span>`}</div>`);
+  return html`<div class="section"><div class="card stack" style="gap:12px">
+    <div class="form-msg ${head.tone}" role="status"><strong>${head.title}</strong><div style="margin-top:4px">${head.text}</div></div>
+    ${paid.length
+      ? html`<div class="card flush" style="box-shadow:none"><div class="list">${rows}</div></div>
+        ${kind === "cancelled" && paid.filter((c) => c.provider === "manual").length > 1 ? html`<div class="row" style="justify-content:flex-end"><button class="btn sm" type="button" data-return-all>${icon("check")} I've returned everything</button></div>` : ""}`
+      : html`<p class="muted">All verified payments have been returned.</p>`}
+    ${sent.length ? html`<p class="faint" style="font-size:var(--fs-xs)">Already returned: ${sent.length} payment${sent.length === 1 ? "" : "s"}, ${formatRWF(sentTotal)}.</p>` : ""}
+    <p class="faint" style="font-size:var(--fs-xs)">SquadVault never moves money by itself. “Returned” is a record that you sent it back.</p>
+  </div></div>`;
+}
+
+/** Marks one payment as returned after the leader confirms they sent the money back. */
+export function openReturnDialog({ id, name, amount, onDone }) {
+  const m = openModal({
+    title: `Return ${formatRWF(Number(amount))} to ${name}`,
+    content: html`<form class="form" novalidate>
+      <p class="muted">Send the money back from your own MoMo first. This only records that it was returned, and ${name} will see it in their history.</p>
+      <div class="field"><label for="f-why">Reason</label><select class="select" id="f-why" name="why">${RETURN_REASONS.map((r) => html`<option>${r}</option>`)}</select></div>
+      <div class="field" data-field="sent"><label class="check"><input type="checkbox" name="sent" value="yes" id="f-sent" aria-describedby="err-sent"><span>I have already sent ${formatRWF(Number(amount))} back to ${name}.</span></label><div class="error" id="err-sent" role="alert"></div></div>
+      ${formMsgSlot()}
+      <div class="foot"><button class="btn ghost" type="button" data-cancel>Cancel</button><button class="btn primary" type="submit">Mark returned</button></div></form>`,
+  });
+  const form = $("form", m.el);
+  $("[data-cancel]", m.el).addEventListener("click", () => m.close());
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearFieldErrors(form);
+    const v = formData(form);
+    if (v.sent !== "yes") return setFieldError(form, "sent", "Tick this once the money has really been sent back.");
+    const btn = $('button[type="submit"]', form);
+    setBusy(btn, true, "Saving…");
+    try {
+      await rpc("review_contribution", { p_contribution_id: id, p_decision: "refunded", p_reason: `Returned: ${v.why}` });
+      toast("Marked as returned.", "success");
+      m.close();
+      onDone?.();
+    } catch (err) { formMessage(form, "error", err.message); setBusy(btn, false); }
+  });
+}
+
+/** Marks every remaining manual payment of a cancelled event as returned (one confirmation). */
+export async function returnAll(contributions, onDone) {
+  const rows = contributions.filter((c) => c.status === "paid" && c.provider === "manual");
+  if (!rows.length) return;
+  const total = rows.reduce((a, c) => a + c.amount, 0);
+  if (!(await confirmDialog({ title: "Mark everything as returned?", message: `This records that you sent back ${formatRWF(total)} to ${rows.length} member${rows.length === 1 ? "" : "s"}. Only do this once the money has really been sent.`, confirmLabel: "Yes, all returned" }))) return;
+  let done = 0;
+  for (const c of rows) {
+    try { await rpc("review_contribution", { p_contribution_id: c.id, p_decision: "refunded", p_reason: "Returned: Event cancelled" }); done++; }
+    catch (err) { toastError(err); break; }
+  }
+  if (done) toast(`${done} payment${done === 1 ? "" : "s"} marked as returned.`, "success");
+  onDone?.();
+}
+
+/** Dashboard / group alert: events where the leader still has money to return. */
+export function returnsAlert(events, finMap) {
+  const mine = events.filter((e) => e.status === "cancelled" && isManagerRole(groupById(e.group_id)?.role) && (finMap.get(e.id)?.paid_total ?? 0) > 0);
+  if (!mine.length) return "";
+  return html`<div class="section"><div class="form-msg warn" role="status"><strong>${mine.length === 1 ? "A cancelled event still holds money" : `${mine.length} cancelled events still hold money`}.</strong>
+    <div style="margin-top:6px;display:grid;gap:6px">${mine.map((e) => html`<a href="#/events/${e.id}" style="color:inherit;text-decoration:underline">${e.name}: ${formatRWF(finMap.get(e.id).paid_total)} to return</a>`)}</div></div></div>`;
 }

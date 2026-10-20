@@ -1,5 +1,5 @@
 // Events: list, create, edit, detail with verified-only progress, contributors, expenses, history.
-import { activeGroup, groupById, isManagerRole } from "./state.js";
+import { state, activeGroup, groupById, isManagerRole } from "./state.js";
 import { fetchEvents, fetchEvent, fetchFinancials, fetchEventFinancials, fetchContributions, fetchExpenses, fetchEventProgress, fetchClaimHints, fetchCollectorActive, buildActivity, finOrEmpty } from "./data.js";
 import { rpc } from "./supabase.js";
 import { navigate } from "./router.js";
@@ -13,8 +13,9 @@ import { expenseRow, activityRows, openReceipt } from "./components.js";
 import { openExpenseDialog } from "./expenses.js";
 import {
   payFields, readPayFields, savePayDetails, hasPayDetails, accountCard, bindCopyAndDial, progressSection, reminderText,
-  claimsQueue, reviewClaim, confirmWithReceipt, openRecordDialog,
+  claimsQueue, reviewClaim, confirmWithReceipt, openRecordDialog, returnsPanel, openReturnDialog, returnAll,
 } from "./momo.js";
+import { uploadGroupImage, removeGroupImage, PHOTO_TYPES } from "./media.js";
 import { copyText } from "./utils.js";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,12 @@ function eventForm(ev) {
     ${field({ name: "name", label: "Event name", value: ev?.name ?? "", placeholder: "e.g. Aline & Eric's wedding", attrs: 'maxlength="80" autofocus' })}
     ${field({ name: "target", label: "Target amount", value: ev ? String(ev.target_amount) : "", prefix: "RWF", attrs: 'inputmode="numeric"', help: "Whole RWF, no decimals." })}
     ${field({ name: "date", label: "Event date (optional)", type: "date", value: ev?.event_date ?? "", required: false })}
+    <div class="field" data-field="cover"><label for="f-cover">Event picture (optional)</label>
+      ${ev?.cover_path ? html`<div class="cover sm" data-sbimg="${ev.cover_path}" role="img" aria-label="Current picture"></div>
+        <label class="check" style="margin-top:8px"><input type="checkbox" name="cover_remove" value="yes"><span>Remove the current picture</span></label>` : ""}
+      <input class="input" id="f-cover" name="cover" type="file" accept="${PHOTO_TYPES.join(",")}" aria-describedby="err-cover">
+      <div class="help">${ev?.cover_path ? "Choose a new file to replace it. " : ""}A wide photo works best. Large pictures are shrunk automatically.</div>
+      <div class="error" id="err-cover" role="alert"></div></div>
     ${payFields(ev)}
     ${formMsgSlot()}
     <div class="foot"><button class="btn ghost" type="button" data-cancel>Cancel</button><button class="btn primary" type="submit">${ev ? "Save changes" : "Create event"}</button></div>
@@ -44,10 +51,13 @@ function bindEventForm(m, onSubmit) {
     if (!target) return setFieldError(form, "target", "Enter a whole amount in RWF, e.g. 500000.");
     const paid = readPayFields(form);
     if (!paid) return;
+    const file = form.elements.cover?.files?.[0] ?? null;
+    if (file && !PHOTO_TYPES.includes(file.type)) return setFieldError(form, "cover", "Use a JPG, PNG or WebP picture.");
+    const cover = { file, remove: v.cover_remove === "yes" && !file };
     const btn = $('button[type="submit"]', form);
     setBusy(btn, true, "Saving…");
     try {
-      await onSubmit({ name, target, date: v.date || null, pay: paid.pay });
+      await onSubmit({ name, target, date: v.date || null, pay: paid.pay, cover });
       m.close();
     } catch (err) {
       formMessage(form, "error", err.message);
@@ -56,10 +66,29 @@ function bindEventForm(m, onSubmit) {
   });
 }
 
+/** Picture step of the event form. The event itself is already saved, so a failure here only warns. */
+async function applyCover(eventId, groupId, cover) {
+  if (!cover?.file && !cover?.remove) return;
+  let path = null;
+  try {
+    if (cover.file) {
+      path = await uploadGroupImage(groupId, state.user.id, cover.file);
+      await rpc("set_event_cover", { p_event_id: eventId, p_path: path });
+    } else {
+      await rpc("set_event_cover", { p_event_id: eventId, p_path: null });
+    }
+  } catch (err) {
+    if (path) removeGroupImage(path);
+    toastError(err);
+    toast("The event was saved, but the picture wasn't. Open the event and tap Edit to try again.", "info");
+  }
+}
+
 export function openCreateEventDialog(group, onDone) {
   const m = openModal({ title: `New event in ${group.name}`, content: eventForm(null) });
-  bindEventForm(m, async ({ name, target, date, pay }) => {
+  bindEventForm(m, async ({ name, target, date, pay, cover }) => {
     const id = await rpc("create_event", { p_group_id: group.id, p_name: name, p_target_amount: target, p_event_date: date });
+    await applyCover(id, group.id, cover);
     if (pay.account || pay.expected) {
       try { await savePayDetails(id, pay); }
       catch (err) { toastError(err); toast("Event created, but the payment details weren't saved. Open the event and tap Edit.", "info"); }
@@ -71,8 +100,9 @@ export function openCreateEventDialog(group, onDone) {
 
 function openEditEventDialog(ev, onDone) {
   const m = openModal({ title: "Edit event", content: eventForm(ev) });
-  bindEventForm(m, async ({ name, target, date, pay }) => {
+  bindEventForm(m, async ({ name, target, date, pay, cover }) => {
     await rpc("update_event", { p_event_id: ev.id, p_name: name, p_target_amount: target, p_event_date: date });
+    await applyCover(ev.id, ev.group_id, cover);
     await savePayDetails(ev.id, pay);
     toast("Event updated.", "success");
     onDone();
@@ -151,6 +181,7 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
         const when = event.event_date ? `${formatDate(event.event_date)}${event.status === "active" && days !== null ? (days > 0 ? ` · in ${days} day${days === 1 ? "" : "s"}` : days === 0 ? " · today" : " · past") : ""}` : "No date set";
 
         mount(view, html`
+          ${event.cover_path ? html`<div class="cover hero" data-sbimg="${event.cover_path}" role="img" aria-label="Picture for ${event.name}"></div>` : ""}
           <div class="page-head"><div><p class="eyebrow">${group?.name ?? "Group"}</p>
             <h1 style="margin-top:6px">${event.name}</h1>
             <p class="sub">${when}  ${badge(event.status)}</p></div>
@@ -188,6 +219,8 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
                 ? emptyState({ iconName: "wallet", title: "Add your MoMo number or code", text: "Members need somewhere to send their contribution.", actions: html`<button class="btn primary" type="button" data-edit>${icon("edit")} Add payment details</button>` })
                 : html`<p class="muted">The leader hasn't added a MoMo number or code yet.</p>`}</div>` : ""}
 
+          ${manager ? returnsPanel(event, fin, contributions) : ""}
+
           ${manager ? claimsQueue(claims, hints, collectorActive) : ""}
 
           <div class="grid cols-2 section" style="align-items:start">
@@ -206,6 +239,8 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
         bindCopyAndDial(view);
         on(view, "click", "[data-confirm-receipt]", async (_, b) => { if (await confirmWithReceipt(b.dataset.id, b.dataset.receipt, b.dataset.strength)) draw(); });
         on(view, "click", "[data-review]", async (_, b) => { if (await reviewClaim(b.dataset.id, b.dataset.review)) draw(); });
+        on(view, "click", "[data-return]", (_, b) => openReturnDialog({ id: b.dataset.return, name: b.dataset.name, amount: b.dataset.amount, onDone: () => draw() }));
+        on(view, "click", "[data-return-all]", () => returnAll(contributions, () => draw()));
         on(view, "click", "[data-record]", (_, b) => openRecordDialog({ event, rows: progress, userId: b.dataset.record, owed: Number(b.dataset.owed) || 0, onDone: () => draw() }));
         on(view, "click", "[data-record-any]", () => openRecordDialog({ event, rows: progress, onDone: () => draw() }));
         on(view, "click", "[data-remind]", async () => { if (await copyText(reminderText(progress, event, group?.name ?? "SquadVault"))) toast("Reminder copied. Paste it in your group chat.", "success"); });
@@ -215,7 +250,7 @@ export async function renderEventDetail({ outlet, params, isCurrent }) {
           const status = b.dataset.status;
           const copy = {
             completed: ["Mark as completed?", "No more contributions will be accepted. Recorded expenses are still allowed."],
-            cancelled: ["Cancel this event?", "Contributions stop. Money already collected is NOT refunded automatically. Handle refunds with your members."],
+            cancelled: ["Cancel this event?", "Contributions stop. Money already collected is NOT sent back automatically. This page will then list every payment so you can return it and mark it as returned."],
             active: ["Reopen this event?", "It will accept contributions again."],
           }[status];
           if (!(await confirmDialog({ title: copy[0], message: copy[1], confirmLabel: status === "cancelled" ? "Cancel event" : "Confirm", danger: status === "cancelled" }))) return;

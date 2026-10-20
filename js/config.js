@@ -25,6 +25,7 @@ export const config = Object.freeze({
     maxMoney: 1_000_000_000_000,
     receiptMaxBytes: 5 * 1024 * 1024,
     avatarMaxBytes: 1024 * 1024,
+    photoMaxBytes: 3 * 1024 * 1024,
   }),
 });
 

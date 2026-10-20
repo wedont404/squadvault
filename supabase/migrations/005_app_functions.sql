@@ -212,6 +212,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- list_invitations(p_group_id): managers only. Never returns code hashes.
 -- ---------------------------------------------------------------------------
+drop function if exists public.list_invitations(uuid);
 create or replace function public.list_invitations(p_group_id uuid)
 returns table (
   id uuid,

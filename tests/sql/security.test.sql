@@ -1,5 +1,5 @@
 -- Behavioural security tests for the SquadVault migrations. Run via tests/run-sql-tests.sh
--- (needs a scratch Postgres with supabase_stub.sql + migrations 001-008 applied). Everything runs in
+-- (needs a scratch Postgres with supabase_stub.sql + migrations 001-009 applied). Everything runs in
 -- one transaction that is rolled back at the end. Any failed assertion aborts with a message.
 \set ON_ERROR_STOP on
 begin;
@@ -60,8 +60,9 @@ do $$
 declare found int;
 begin
   assert (select code_hash from public.invitation_codes) = encode(extensions.digest(current_setting('t.code'), 'sha256'), 'hex'), 'sha256 hash stored';
-  select count(*) into found from public.invitation_codes ic where ic::text like '%' || current_setting('t.code') || '%';
-  assert found = 0, 'plaintext code must not be stored';
+  -- since 009 the code is kept in code_plain so leaders can read it again; redemption still uses the hash
+  select count(*) into found from public.invitation_codes ic where ic.code_hash like '%' || current_setting('t.code') || '%';
+  assert found = 0, 'the hash column never holds the plaintext';
 end $$;
 
 -- B joins
@@ -439,6 +440,249 @@ select public.revoke_collector_token(:'g');
 reset role;
 set local role anon;
 do $$ begin assert public.ingest_momo_sms(current_setting('t.tok'), 'You have received 1000 RWF from X. Transaction Id: 777777777') ->> 'error' = 'invalid_token', 'revoked token stops working'; end $$;
+reset role;
+
+
+-- ===== 009: visible invite codes, sender-name checks, pictures, chat, photos, games ===========
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0', 'f@x.rw', '{"display_name":"Fiona Mukamana"}'),
+  ('90909090-9090-9090-9090-909090909090', 'g9@x.rw', '{"display_name":"Gad Habimana"}'),
+  ('12121212-1212-1212-1212-121212121212', 'h@x.rw', '{"display_name":"Outsider Hh"}');
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.add_member_by_email(:'g', 'f@x.rw');
+select public.add_member_by_email(:'g', 'g9@x.rw');
+-- leader can read an active code again; members can't list; spent/revoked ones show no code
+select public.create_invitation_code(:'g', 3, 5) as inv \gset
+select set_config('t.inv', :'inv', true);
+do $$ declare v_code text := (current_setting('t.inv')::jsonb ->> 'code'); begin
+  assert (select l.code from public.list_invitations(current_setting('t.g')::uuid) l where l.id = (current_setting('t.inv')::jsonb ->> 'id')::uuid) = v_code, 'leader can read an active code again';
+  assert (select count(*) from public.list_invitations(current_setting('t.g')::uuid) l where l.status <> 'active' and l.code is not null) = 0, 'only active codes are shown';
+end $$;
+select public.revoke_invitation_code((:'inv'::jsonb ->> 'id')::uuid);
+do $$ begin assert (select l.code from public.list_invitations(current_setting('t.g')::uuid) l where l.id = (current_setting('t.inv')::jsonb ->> 'id')::uuid) is null, 'revoked code is hidden'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select t.expect_err($$select * from public.list_invitations(current_setting('t.g')::uuid)$$, 'not_allowed');
+reset role;
+
+-- name scoring
+do $$ begin
+  assert private.name_score('Jean Paul Nshimiyimana', 'NSHIMIYIMANA Jean-Paul') = 100, 'order, case and hyphen do not matter';
+  assert private.name_strong('Jean Paul', 'JEAN PAUL NSHIMIYIMANA'), 'every word of the shorter name present';
+  assert not private.name_strong('Jean', 'Jean Bosco'), 'a shared first name alone is not strong';
+  assert private.name_strong('Eric', 'ERIC'), 'identical single words are strong';
+  assert private.name_score('Éric Kamanzi', 'eric kamanzi') = 100, 'accents are folded';
+  assert private.name_score('Alice Uwase', 'Bob Habimana') = 0, 'different people score 0';
+  assert private.name_score(null, 'Bob') = 0 and not private.name_strong('', 'x'), 'empty names never match';
+end $$;
+
+-- collector for the name tests
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.create_collector_token(:'g') as tok2 \gset
+select set_config('t.tok2', :'tok2', true);
+do $$ begin assert (public.collector_status(current_setting('t.g')::uuid) ->> 'auto_by_name')::boolean, 'name matching defaults to on'; end $$;
+select public.create_event(:'g', 'Name Event', 900000, null) as n \gset
+select set_config('t.n', :'n', true);
+select public.set_event_payment_details(:'n', 'mtn_momo', 'number', '0788123456', 'Leader', null);
+reset role;
+
+-- F claims with the name MoMo shows, no transaction ID: waiting. The SMS arrives later -> auto-verified.
+select set_config('request.jwt.claim.sub', 'f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0', true);
+set local role authenticated;
+select public.submit_payment_claim(:'n', 15000, null, 'Fiona M. Mukamana') as f1 \gset
+select set_config('t.f1', :'f1', true);
+do $$ begin assert (select status from public.contributions where id = current_setting('t.f1')::uuid) = 'pending', 'nothing to compare with yet'; end $$;
+reset role;
+set local role anon;
+do $$ begin
+  assert not (public.ingest_momo_sms(current_setting('t.tok2'), 'You have received 15000 RWF from Someone Else on your account. Financial Transaction Id: 610000000001.') ->> 'matched')::boolean, 'right amount, wrong name: not auto-verified';
+  assert (public.ingest_momo_sms(current_setting('t.tok2'), 'You have received 15000 RWF from FIONA MUKAMANA on your account. Financial Transaction Id: 610000000002.') ->> 'matched')::boolean, 'new SMS with the same name and amount re-checks the waiting claim';
+end $$;
+reset role;
+do $$ begin
+  assert (select status from public.contributions where id = current_setting('t.f1')::uuid) = 'paid', 'claim verified by sender name + amount';
+  assert (select note from public.contributions where id = current_setting('t.f1')::uuid) like '%sender name and amount%', 'note says how';
+end $$;
+
+-- SMS first, claim second: matched at submit time (uses the profile name when no sender name is given)
+set local role anon;
+select public.ingest_momo_sms(current_setting('t.tok2'), 'You have received 8000 RWF from Gad Habimana on your account. Financial Transaction Id: 620000000001.');
+reset role;
+select set_config('request.jwt.claim.sub', '90909090-9090-9090-9090-909090909090', true);
+set local role authenticated;
+select public.submit_payment_claim(:'n', 8000, null) as g1 \gset
+select set_config('t.g1', :'g1', true);
+reset role;
+do $$ begin assert (select status from public.contributions where id = current_setting('t.g1')::uuid) = 'paid', 'claim after the SMS is verified straight away'; end $$;
+
+-- ambiguity: two claims with the same name and amount -> nobody is auto-verified, leader decides
+select set_config('request.jwt.claim.sub', 'f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0', true);
+set local role authenticated;
+select public.submit_payment_claim(:'n', 3000, null, 'Fiona Mukamana') as f2 \gset
+select public.submit_payment_claim(:'n', 3000, null, 'Fiona Mukamana') as f3 \gset
+select set_config('t.f2', :'f2', true), set_config('t.f3', :'f3', true);
+reset role;
+set local role anon;
+do $$ begin assert not (public.ingest_momo_sms(current_setting('t.tok2'), 'You have received 3000 RWF from Fiona Mukamana. Financial Transaction Id: 630000000001.') ->> 'matched')::boolean, 'two identical claims: left for the leader'; end $$;
+reset role;
+do $$ begin assert (select count(*) from public.contributions where id in (current_setting('t.f2')::uuid, current_setting('t.f3')::uuid) and status = 'pending') = 2, 'both stay pending'; end $$;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+do $$ begin assert (select name_score from public.claim_match_hints(current_setting('t.n')::uuid) where contribution_id = current_setting('t.f2')::uuid limit 1) = 100, 'hint carries the name score'; end $$;
+-- leader switches name matching off: nothing is auto-verified by name any more
+select public.set_auto_by_name(:'g', false);
+reset role;
+select set_config('request.jwt.claim.sub', '90909090-9090-9090-9090-909090909090', true);
+set local role authenticated;
+select public.submit_payment_claim(:'n', 4100, null, 'Gad Habimana') as g2 \gset
+select set_config('t.g2', :'g2', true);
+reset role;
+set local role anon;
+do $$ begin assert not (public.ingest_momo_sms(current_setting('t.tok2'), 'You have received 4100 RWF from Gad Habimana. Financial Transaction Id: 640000000001.') ->> 'matched')::boolean, 'switch off: no automatic name matching'; end $$;
+reset role;
+do $$ begin assert (select status from public.contributions where id = current_setting('t.g2')::uuid) = 'pending', 'stays pending'; end $$;
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select t.expect_err($$select public.set_auto_by_name(current_setting('t.g')::uuid, true)$$, 'not_allowed');
+reset role;
+-- bad sender names are trimmed; very long ones cut
+select set_config('request.jwt.claim.sub', '90909090-9090-9090-9090-909090909090', true);
+set local role authenticated;
+select public.submit_payment_claim(:'n', 1100, null, repeat('x', 200)) as g3 \gset
+select set_config('t.g3', :'g3', true);
+reset role;
+do $$ begin assert (select char_length(sender_name) from public.contributions where id = current_setting('t.g3')::uuid) = 60, 'sender name capped at 60'; end $$;
+
+-- ===== pictures, photo wall =================================================================
+insert into storage.objects (bucket_id, name) values
+  ('group-photos', current_setting('t.g') || '/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/11111111-1111-1111-1111-111111111111.jpg'),
+  ('group-photos', current_setting('t.g') || '/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee/22222222-2222-2222-2222-222222222222.png'),
+  ('group-photos', gen_random_uuid() || '/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/33333333-3333-3333-3333-333333333333.jpg');
+select set_config('t.pX', (select name from storage.objects where name like '%33333333%'), true);
+select set_config('t.pA', current_setting('t.g') || '/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/11111111-1111-1111-1111-111111111111.jpg', true);
+select set_config('t.pE', current_setting('t.g') || '/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee/22222222-2222-2222-2222-222222222222.png', true);
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.set_event_cover(:'n', current_setting('t.pA'));
+do $$ begin assert (select cover_path from public.events where id = current_setting('t.n')::uuid) = current_setting('t.pA'), 'leader sets an event picture'; end $$;
+select t.expect_err($$select public.set_event_cover(current_setting('t.n')::uuid, 'not-a-path.jpg')$$, 'invalid_photo');
+select t.expect_err($$select public.set_event_cover(current_setting('t.n')::uuid, current_setting('t.pX'))$$, 'invalid_photo');
+select t.expect_err($$update public.events set cover_path = 'x' where id = current_setting('t.n')::uuid$$, 'permission denied');
+reset role;
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select t.expect_err($$select public.set_event_cover(current_setting('t.n')::uuid, null)$$, 'not_allowed');
+-- member adds a photo of their own, not someone else's folder
+select t.expect_err($$select public.add_group_photo(current_setting('t.g')::uuid, current_setting('t.pA'), 'sneaky')$$, 'invalid_photo');
+select public.add_group_photo(:'g', current_setting('t.pE'), 'Planning night', :'n') as ph \gset
+select set_config('t.ph', :'ph', true);
+select public.toggle_photo_like(:'ph');
+do $$ begin
+  assert (select like_count from public.list_group_photos(current_setting('t.g')::uuid) where id = current_setting('t.ph')::uuid) = 1, 'one heart';
+  assert (select liked_by_me from public.list_group_photos(current_setting('t.g')::uuid) where id = current_setting('t.ph')::uuid), 'liked by me';
+  assert (public.toggle_photo_like(current_setting('t.ph')::uuid) ->> 'liked')::boolean = false, 'tap again removes the heart';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '12121212-1212-1212-1212-121212121212', true);
+set local role authenticated;
+select t.expect_err($$select * from public.list_group_photos(current_setting('t.g')::uuid)$$, 'not_allowed');
+select t.expect_err($$select public.toggle_photo_like(current_setting('t.ph')::uuid)$$, 'not_allowed');
+do $$ begin assert (select count(*) from public.group_photos) = 0, 'outsider sees no photos through RLS'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '90909090-9090-9090-9090-909090909090', true);
+set local role authenticated;
+select t.expect_err($$select public.delete_group_photo(current_setting('t.ph')::uuid)$$, 'not_allowed');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+do $$ begin assert public.delete_group_photo(current_setting('t.ph')::uuid) = current_setting('t.pE'), 'leader removes a photo and gets its path back'; end $$;
+reset role;
+
+-- ===== chat =================================================================================
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select public.post_group_message(:'g', '  Hello squad!  ') as m1 \gset
+select set_config('t.m1', :'m1', true);
+do $$ begin assert (select body from public.group_messages where id = current_setting('t.m1')::uuid) = 'Hello squad!', 'message is trimmed and stored'; end $$;
+select t.expect_err($$select public.post_group_message(current_setting('t.g')::uuid, '   ')$$, 'invalid_message');
+select t.expect_err($$select public.post_group_message(current_setting('t.g')::uuid, repeat('a', 1001))$$, 'invalid_message');
+select t.expect_err($$insert into public.group_messages (group_id, user_id, body) values (current_setting('t.g')::uuid, auth.uid(), 'direct')$$, 'permission denied');
+do $$ begin for i in 1..19 loop perform public.post_group_message(current_setting('t.g')::uuid, 'spam ' || i); end loop; end $$;
+select t.expect_err($$select public.post_group_message(current_setting('t.g')::uuid, 'one too many')$$, 'rate_limited');
+reset role;
+select set_config('request.jwt.claim.sub', '12121212-1212-1212-1212-121212121212', true);
+set local role authenticated;
+select t.expect_err($$select public.post_group_message(current_setting('t.g')::uuid, 'let me in')$$, 'not_allowed');
+do $$ begin assert (select count(*) from public.group_messages) = 0, 'outsider reads no chat'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '90909090-9090-9090-9090-909090909090', true);
+set local role authenticated;
+select t.expect_err($$select public.delete_group_message(current_setting('t.m1')::uuid)$$, 'not_allowed');
+do $$ begin assert (select count(*) from public.group_messages) = 20, 'a member reads the chat'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.delete_group_message(:'m1');
+do $$ begin assert not exists (select 1 from public.group_messages where id = current_setting('t.m1')::uuid), 'leader can remove a message'; end $$;
+reset role;
+
+-- ===== games ================================================================================
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select public.create_game(:'g', 'poll', 'Where do we celebrate?', array['Kigali', 'Musanze', ' ', 'Rubavu']) as po \gset
+select public.create_game(:'g', 'guess', 'How much will we save by Friday?') as gu \gset
+select set_config('t.po', :'po', true), set_config('t.gu', :'gu', true);
+select t.expect_err($$select public.create_game(current_setting('t.g')::uuid, 'poll', 'Only one option', array['a'])$$, 'invalid_game');
+select t.expect_err($$select public.create_game(current_setting('t.g')::uuid, 'dice', 'Roll the dice please')$$, 'invalid_game');
+select t.expect_err($$select * from public.group_games$$, 'permission denied');
+select public.play_game(:'po', 2, null);
+select public.play_game(:'po', 3, null);   -- changed my mind: still one vote
+select public.play_game(:'gu', null, 480000);
+select t.expect_err($$select public.play_game(current_setting('t.po')::uuid, 9, null)$$, 'invalid_game');
+do $$ declare j jsonb; begin
+  select x into j from jsonb_array_elements(public.list_games(current_setting('t.g')::uuid)) x where x ->> 'id' = current_setting('t.po');
+  assert (j -> 'options') = '["Kigali","Musanze","Rubavu"]'::jsonb, 'blank options dropped';
+  assert (j -> 'counts') = '[0,0,1]'::jsonb and (j ->> 'my_choice') = '3', 'one vote, the latest choice';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '90909090-9090-9090-9090-909090909090', true);
+set local role authenticated;
+select public.play_game(:'gu', null, 500000);
+do $$ declare j jsonb; begin
+  select x into j from jsonb_array_elements(public.list_games(current_setting('t.g')::uuid)) x where x ->> 'id' = current_setting('t.gu');
+  assert (j ->> 'entries') = '2' and (j -> 'top') = 'null'::jsonb, 'other guesses stay hidden while open';
+  assert (j ->> 'my_guess') = '500000', 'I can see my own guess';
+end $$;
+select t.expect_err($$select public.close_game(current_setting('t.gu')::uuid, 1)$$, 'not_allowed');
+reset role;
+select set_config('request.jwt.claim.sub', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', true);
+set local role authenticated;
+select t.expect_err($$select public.close_game(current_setting('t.gu')::uuid, null)$$, 'invalid_game');
+select public.close_game(:'gu', 495000);
+select t.expect_err($$select public.play_game(current_setting('t.gu')::uuid, null, 1)$$, 'game_closed');
+do $$ declare j jsonb; begin
+  select x into j from jsonb_array_elements(public.list_games(current_setting('t.g')::uuid)) x where x ->> 'id' = current_setting('t.gu');
+  assert (j -> 'top' -> 0 ->> 'user_id') = '90909090-9090-9090-9090-909090909090' and (j -> 'top' -> 0 ->> 'diff') = '5000', 'closest guess wins';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '12121212-1212-1212-1212-121212121212', true);
+set local role authenticated;
+select t.expect_err($$select public.list_games(current_setting('t.g')::uuid)$$, 'not_allowed');
+select t.expect_err($$select public.play_game(current_setting('t.po')::uuid, 1, null)$$, 'not_allowed');
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.delete_game(:'po');
+do $$ begin assert (select count(*) from jsonb_array_elements(public.list_games(current_setting('t.g')::uuid))) = 1, 'leader can remove a game'; end $$;
+reset role;
+set local role anon;
+select t.expect_err($$select public.list_games(gen_random_uuid())$$, 'permission denied');
+select t.expect_err($$select public.post_group_message(gen_random_uuid(), 'x')$$, 'permission denied');
+select t.expect_err($$select * from public.group_messages$$, 'permission denied');
 reset role;
 
 -- anon has nothing

@@ -194,6 +194,16 @@ This is the default way to collect. `config.onlinePayments` is `false`, so the I
 Unverified: the USSD shortcut formats. `*182*1*1*<number>*<amount>#` is the format supplied by the project owner; the merchant-code format `*182*8*1*<code>*<amount>#` and Airtel's `*500#` menu are not confirmed. Test them with a small amount on a real phone. If a shortcut fails, the page tells the member to dial `*182#` and enter the number manually.
 
 
+## Squad extras, sender-name checks and returns (update 009)
+
+Run `supabase/SQUADVAULT_UPDATE_009.sql` once in the Supabase SQL Editor (it is also in `SQUADVAULT_ALL_IN_ONE.sql` for new setups). It needs 007 and 008 first.
+
+- **Invitation codes stay visible.** Admins and treasurers see the active code again on the Invitations page (with Copy and WhatsApp share). Codes made before 009 can't be recovered; they still work and can be revoked.
+- **Sign-up errors.** "Email rate limit" is the free Supabase email sender, not the person. The app now says so, waits 60 s before allowing another try, offers "Resend confirmation email", and tells people when an email already has an account. The real cure is custom SMTP (see `supabase/email-templates/README.md`).
+- **Sender-name checking.** Members type the name MoMo shows. Each new MoMo message from the leader's phone re-checks waiting claims: same amount + strongly matching sender name + close in time + only one claim fits = confirmed automatically. Anything unclear stays with the leader. The leader can turn this off in *Payment checking*.
+- **Returning money.** Cancelled events (or completed/overfunded ones) show a "Return the money?" panel to leaders, and the dashboard flags cancelled events that still hold money. SquadVault only records the return; the leader sends the money from their own MoMo.
+- **Event pictures** (Create/Edit event) and a **Squad** page with **chat**, a **photo wall** with hearts, and **games** (polls and "guess the number"). Pictures live in the private `group-photos` bucket and are shrunk on the phone before upload.
+
 ## Automatic payment checking (optional, Android)
 
 No app can read MTN/Airtel records directly without a payment-provider API. SquadVault instead reads the leader's own

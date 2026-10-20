@@ -37,7 +37,7 @@ export async function fetchMembers(groupId) {
     .sort((a, b) => order[a.role] - order[b.role] || a.name.localeCompare(b.name));
 }
 
-const EVENT_COLS = "id,group_id,name,target_amount,event_date,status,created_at,pay_provider,pay_kind,pay_account,pay_account_name,expected_per_member";
+const EVENT_COLS = "id,group_id,name,target_amount,event_date,status,created_at,pay_provider,pay_kind,pay_account,pay_account_name,expected_per_member,cover_path";
 
 export async function fetchEvents(groupIds) {
   if (!groupIds.length) return [];
@@ -79,7 +79,7 @@ function normalizeFin(r) {
 export const finOrEmpty = (map, id) => map.get(id) ?? emptyFin();
 
 const CONTRIB_COLS =
-  "id,event_id,user_id,amount,status,payment_method,provider,note,payment_reference,is_simulated,failure_reason,paid_at,created_at,events!inner(id,name,group_id)";
+  "id,event_id,user_id,amount,status,payment_method,provider,provider_ref,sender_name,note,payment_reference,is_simulated,failure_reason,paid_at,created_at,events!inner(id,name,group_id)";
 
 export async function fetchContributions({ groupId = null, eventId = null, userId = null, status = null, limit = 100 } = {}) {
   let q = supabase.from("contributions").select(CONTRIB_COLS).order("created_at", { ascending: false }).limit(limit);
@@ -174,4 +174,35 @@ export async function fetchCollectorActive(groupId) {
 export async function fetchContributionStatus(id) {
   const row = must(await supabase.from("contributions").select("status").eq("id", id).maybeSingle());
   return row?.status ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Squad: chat, photos, games (reads only; writes are RPCs in hub.js)
+// ---------------------------------------------------------------------------
+/** Newest 80 messages, oldest first, with names. */
+export async function fetchMessages(groupId, limit = 80) {
+  const rows = must(await supabase.from("group_messages").select("id,user_id,body,created_at").eq("group_id", groupId).order("created_at", { ascending: false }).limit(limit)) ?? [];
+  const profiles = await fetchProfiles(rows.map((r) => r.user_id));
+  return rows.reverse().map((r) => ({ ...r, name: profiles.get(r.user_id)?.display_name ?? "Member", avatar_path: profiles.get(r.user_id)?.avatar_path ?? null }));
+}
+
+export async function fetchPhotos(groupId) {
+  const rows = (await rpc("list_group_photos", { p_group_id: groupId, p_limit: 60 })) ?? [];
+  const profiles = await fetchProfiles(rows.map((r) => r.user_id));
+  return rows.map((r) => ({ ...r, like_count: toInt(r.like_count), name: profiles.get(r.user_id)?.display_name ?? "Member" }));
+}
+
+export async function fetchGames(groupId) {
+  const rows = (await rpc("list_games", { p_group_id: groupId })) ?? [];
+  const ids = rows.flatMap((g) => [g.created_by, ...(g.top ?? []).map((t) => t.user_id)]);
+  const profiles = await fetchProfiles(ids);
+  const nm = (id) => profiles.get(id)?.display_name ?? "Member";
+  return rows.map((g) => ({
+    ...g,
+    answer: g.answer == null ? null : toInt(g.answer),
+    my_guess: g.my_guess == null ? null : toInt(g.my_guess),
+    entries: toInt(g.entries),
+    creator: nm(g.created_by),
+    top: (g.top ?? []).map((t) => ({ ...t, guess: toInt(t.guess), diff: toInt(t.diff), name: nm(t.user_id) })),
+  }));
 }

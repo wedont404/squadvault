@@ -6,6 +6,7 @@ import { loadInto, mount, on, statCard, eventProgressCard, emptyState, skeletonP
 import { activityRows } from "./components.js";
 import { openCreateGroupDialog } from "./groups.js";
 import { openJoinDialog } from "./invitations.js";
+import { returnsAlert } from "./momo.js";
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -61,6 +62,8 @@ export async function renderDashboard({ outlet, isCurrent }) {
           ${statCard({ label: "My pending", value: formatRWF(myPendingTotal), hint: myPending.length ? `${myPending.length} waiting for confirmation. Not counted yet` : "Nothing waiting", iconName: "clock" })}
           ${statCard({ label: "Upcoming events", value: upcoming.length, hint: next ? `Next: ${next.name}, ${formatDate(next.event_date)}` : "No dated events", tone: "violet", iconName: "calendar" })}
         </div>
+
+        ${returnsAlert(events, fin)}
 
         <div class="section"><div class="section-head"><h2>Quick actions</h2></div>
           <div class="actions">

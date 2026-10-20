@@ -35,6 +35,12 @@ const ICONS = {
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  chat: '<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z"/><path d="M8 10h8M8 13h5"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-8 8"/>',
+  game: '<rect x="3" y="7" width="18" height="11" rx="4"/><path d="M8 10v5M5.5 12.5h5"/><circle cx="15.5" cy="11.5" r=".9"/><circle cx="18" cy="14" r=".9"/>',
+  heart: '<path d="M12 20s-7.5-4.6-9-9.5A4.8 4.8 0 0 1 12 7a4.8 4.8 0 0 1 9 3.5C19.5 15.4 12 20 12 20z"/>',
+  trophy: '<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3M12 14v4M8 20h8"/>',
+  send: '<path d="M21 3 10 14"/><path d="m21 3-7 18-4-7-7-4z"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.01"/>',
 };
 export function icon(name) {
@@ -232,6 +238,7 @@ export function statCard({ label, value, hint = "", tone = "", iconName = null }
 export function eventProgressCard(ev, fin, href) {
   const p = percent(fin.paid_total, ev.target_amount);
   return html`<a class="card link" href="${href}">
+    ${ev.cover_path ? html`<div class="cover" data-sbimg="${ev.cover_path}" role="img" aria-label="Picture for ${ev.name}"></div>` : ""}
     <div class="row between"><h3>${ev.name}</h3>${badge(ev.status)}</div>
     <div style="margin:14px 0 6px" class="mono"><strong style="font-size:1.35rem;font-family:var(--font-display)">${formatRWF(fin.paid_total)}</strong>
       <span class="muted"> of ${formatRWF(ev.target_amount)}</span></div>

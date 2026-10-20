@@ -311,3 +311,53 @@ h1, h2, h3 { text-wrap: balance; }
 .check input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--green); flex: none; }
 .auth-panel { align-content: center; }
 .auth-panel .site-foot { margin-top: var(--s5); }
+
+/* ---- 009: pictures, squad hub, returns ---------------------------------------------------- */
+.cover { width: 100%; aspect-ratio: 16 / 7; border-radius: var(--r-md); background: var(--surface-2) center / cover no-repeat; margin-bottom: 12px; opacity: 0; transition: opacity .3s var(--ease); }
+.cover.loaded { opacity: 1; }
+.cover.hero { aspect-ratio: 16 / 6; border-radius: var(--r-lg); margin-bottom: var(--s4); }
+.cover.sm { aspect-ratio: 16 / 7; max-width: 280px; }
+details.more > summary { list-style: none; }
+details.more > summary::-webkit-details-marker { display: none; }
+
+.chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; height: min(68vh, 640px); min-height: 360px; }
+.chat-log { overflow-y: auto; padding: var(--s4); display: flex; flex-direction: column; gap: 10px; overscroll-behavior: contain; }
+.msg { display: flex; gap: 10px; align-items: flex-end; max-width: 88%; }
+.msg.me { align-self: flex-end; flex-direction: row-reverse; }
+.msg .bubble { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 18px 18px 18px 6px; padding: 8px 12px; min-width: 0; }
+.msg.me .bubble { background: var(--ok-bg); border-color: rgba(183, 255, 69, 0.25); border-radius: 18px 18px 6px 18px; }
+.msg .meta { display: flex; gap: 8px; align-items: center; font-size: var(--fs-xs); color: var(--faint); }
+.msg .meta strong { color: var(--muted); font-weight: 600; }
+.msg .meta .x { margin-left: auto; background: none; border: 0; color: var(--faint); cursor: pointer; padding: 2px; display: grid; }
+.msg .meta .x:hover { color: var(--danger); }
+.msg .meta .x svg { width: 14px; height: 14px; }
+.msg .text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.chat-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--border-soft); align-items: flex-end; }
+.chat-form textarea { resize: none; min-height: 44px; max-height: 140px; flex: 1; }
+
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--s3); }
+.ph { margin: 0; background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-md); overflow: hidden; }
+.ph-img { display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; background: var(--surface-2); cursor: pointer; }
+.ph-img img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .3s var(--ease); }
+.ph-img img.loaded { opacity: 1; }
+.ph figcaption { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: var(--fs-xs); color: var(--muted); }
+.ph .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.like { display: inline-flex; gap: 4px; align-items: center; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px 6px; border-radius: var(--r-pill); font: inherit; }
+.like svg { width: 16px; height: 16px; }
+.like.on { color: var(--danger); }
+.like.on svg { fill: currentColor; }
+.upload-preview, .lightbox { width: 100%; max-height: 60vh; object-fit: contain; border-radius: var(--r-md); background: var(--surface-2); }
+
+.opt { position: relative; display: flex; justify-content: space-between; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px 14px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; overflow: hidden; font: inherit; }
+.opt:disabled { cursor: default; opacity: .9; }
+.opt .bar { position: absolute; inset: 0 auto 0 0; background: rgba(183, 255, 69, 0.14); transition: width .5s var(--ease); }
+.opt .label, .opt .n { position: relative; }
+.opt .n { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+.opt.picked { border-color: rgba(183, 255, 69, 0.55); }
+.opt .label svg { width: 16px; height: 16px; vertical-align: -3px; color: var(--green); }
+
+@media (max-width: 720px) {
+  .chat { height: calc(100vh - 290px); min-height: 320px; }
+  .msg { max-width: 94%; }
+  .photo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

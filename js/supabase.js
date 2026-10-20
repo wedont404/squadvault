@@ -87,6 +87,18 @@ const MESSAGES = {
   invalid_token: "That secret isn't valid.",
   slow_down: "Too many messages at once. Try again in a minute.",
   invalid_code: "That invitation code isn't valid. It may be wrong, expired, revoked or used up.",
+  invalid_photo: "That picture couldn't be used. Try another JPG, PNG or WebP image.",
+  invalid_message: "Messages need 1 to 1000 characters.",
+  invalid_game: "That game isn't set up correctly. Check the title and options.",
+  game_closed: "This game is already closed.",
+  too_many_games: "You already have several open games. Close one first.",
+  // Sign-up / sign-in service limits (these come from the email service, not from the person)
+  over_email_send_rate_limit: "Our email service is busy right now, so the confirmation email could not be sent. Your details were not wrong. Please wait a few minutes and try again. If you already tried once, try signing in first.",
+  over_request_rate_limit: "Lots of people are using SquadVault at the moment. Please wait a minute and try again.",
+  user_already_exists: "An account with this email already exists. Try signing in.",
+  email_not_confirmed: "Please confirm your email first. Check your inbox (and spam), or tap Resend.",
+  weak_password: "That password is too weak. Use 8+ characters with letters and numbers.",
+  email_address_invalid: "That email address doesn't look valid.",
 };
 
 export function friendlyError(err) {
@@ -96,6 +108,8 @@ export function friendlyError(err) {
   const token = msg.trim().split(/[\s:]/)[0];
   if (MESSAGES[token]) return MESSAGES[token];
   if (MESSAGES[err.code]) return MESSAGES[err.code];
+  if (err.status === 429 && /email/i.test(msg)) return MESSAGES.over_email_send_rate_limit;
+  if (err.status === 429) return MESSAGES.over_request_rate_limit;
   if (/jwt expired|invalid jwt|refresh token/i.test(msg)) return MESSAGES.not_authenticated;
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(msg)) {
     return "Can't reach the server. Check your connection and try again.";
@@ -103,7 +117,8 @@ export function friendlyError(err) {
   if (/invalid login credentials/i.test(msg)) return "Email or password is incorrect.";
   if (/email not confirmed/i.test(msg)) return "Please confirm your email first. Check your inbox.";
   if (/already registered|already been registered/i.test(msg)) return "An account with this email already exists. Try signing in.";
-  if (/rate limit|too many requests|over_email_send_rate_limit/i.test(msg)) return MESSAGES.rate_limited;
+  if (/email rate limit|over_email_send_rate_limit/i.test(msg)) return MESSAGES.over_email_send_rate_limit;
+  if (/rate limit|too many requests/i.test(msg)) return MESSAGES.rate_limited;
   if (/password.*(weak|short|least)/i.test(msg)) return "That password is too weak. Use 8+ characters with letters and numbers.";
   if (/permission denied|row-level security|42501/i.test(msg)) return MESSAGES.not_allowed;
   return "Something went wrong. Please try again.";

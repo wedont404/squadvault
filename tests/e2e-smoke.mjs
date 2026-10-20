@@ -36,7 +36,7 @@ const base = `http://localhost:${server.address().port}`;
 const FAKE = `
 const U1='11111111-1111-4111-8111-111111111111', U2='22222222-2222-4222-8222-222222222222';
 const G1='aaaaaaaa-0000-4000-8000-000000000001', G2='aaaaaaaa-0000-4000-8000-000000000002';
-const E1='eeeeeeee-0000-4000-8000-000000000001', E2='eeeeeeee-0000-4000-8000-000000000002';
+const E1='eeeeeeee-0000-4000-8000-000000000001', E2='eeeeeeee-0000-4000-8000-000000000002', E3='eeeeeeee-0000-4000-8000-000000000003';
 const now=Date.now(), iso=(d)=>new Date(now-d*3600e3).toISOString();
 const db={
   profiles:[{id:U1,display_name:'Pop Mugisha',avatar_path:null},{id:U2,display_name:'Aline Uwase',avatar_path:null}],
@@ -44,14 +44,20 @@ const db={
           {user_id:U1,role:'member',joined_at:iso(300),savings_groups:{id:G2,name:'<img src=x onerror="window.__xss=1">',currency:'RWF',created_at:iso(300)}}],
   members:[{group_id:G1,user_id:U1,role:'admin',joined_at:iso(500)},{group_id:G1,user_id:U2,role:'member',joined_at:iso(200)},{group_id:G2,user_id:U1,role:'member',joined_at:iso(300)}],
   events:[{id:E1,group_id:G1,name:'Aline & Eric Wedding',target_amount:2000000,event_date:new Date(now+20*864e5).toISOString().slice(0,10),status:'active',created_at:iso(100),pay_provider:'mtn_momo',pay_kind:'number',pay_account:'0788123456',pay_account_name:'Pop Mugisha',expected_per_member:20000},
-          {id:E2,group_id:G1,name:'Weekend in Akagera',target_amount:600000,event_date:null,status:'completed',created_at:iso(900)}],
+          {id:E2,group_id:G1,name:'Weekend in Akagera',target_amount:600000,event_date:null,status:'completed',created_at:iso(900)},
+          {id:E3,group_id:G1,name:'Cancelled Picnic',target_amount:100000,event_date:null,status:'cancelled',created_at:iso(700),cover_path:G1+'/'+U1+'/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jpg'}],
   event_financials:[{event_id:E1,group_id:G1,target_amount:2000000,event_status:'active',paid_total:750000,pending_total:50000,failed_total:10000,refunded_total:0,expenses_total:200000,available_funds:550000,remaining_amount:1250000},
-                    {event_id:E2,group_id:G1,target_amount:600000,event_status:'completed',paid_total:600000,pending_total:0,failed_total:0,refunded_total:0,expenses_total:0,available_funds:600000,remaining_amount:0}],
+                    {event_id:E2,group_id:G1,target_amount:600000,event_status:'completed',paid_total:600000,pending_total:0,failed_total:0,refunded_total:0,expenses_total:0,available_funds:600000,remaining_amount:0},
+                    {event_id:E3,group_id:G1,target_amount:100000,event_status:'cancelled',paid_total:40000,pending_total:0,failed_total:0,refunded_total:0,expenses_total:0,available_funds:40000,remaining_amount:60000}],
+  group_messages:[{id:'m1',group_id:G1,user_id:U2,body:'Hello <b>squad</b>',created_at:iso(1)},{id:'m2',group_id:G1,user_id:U1,body:'Welcome!',created_at:iso(0.5)}],
   contributions:[
     {id:'c1',event_id:E1,user_id:U2,amount:150000,status:'paid',payment_method:'mtn_momo',payment_reference:'SV-PAY-1',is_simulated:false,failure_reason:null,paid_at:iso(5),created_at:iso(5),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}},
     {id:'c2',event_id:E1,user_id:U1,amount:50000,status:'pending',payment_method:'airtel_money',payment_reference:'SV-PAY-AAAAAAAAAAAAAAAAAAAAAAAA',is_simulated:true,failure_reason:null,paid_at:null,created_at:iso(1),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}},
     {id:'c3',event_id:E1,user_id:U1,amount:10000,status:'failed',payment_method:'mtn_momo',payment_reference:'SV-PAY-3',is_simulated:false,failure_reason:'insufficient funds',paid_at:null,created_at:iso(30),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}},
-    {id:'c4',event_id:E1,user_id:U2,amount:20000,status:'pending',payment_method:'mtn_momo',provider:'manual',provider_ref:'MP2610ABC123',payment_reference:'SV-M-1',is_simulated:false,failure_reason:null,paid_at:null,created_at:iso(2),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}}],
+    {id:'c4',event_id:E1,user_id:U2,amount:20000,status:'pending',payment_method:'mtn_momo',provider:'manual',provider_ref:'MP2610ABC123',sender_name:'Aline Uwase',payment_reference:'SV-M-1',is_simulated:false,failure_reason:null,paid_at:null,created_at:iso(2),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}},
+    {id:'c5',event_id:E3,user_id:U2,amount:30000,status:'paid',payment_method:'mtn_momo',provider:'manual',provider_ref:'MP2610PAID01',sender_name:'Aline Uwase',payment_reference:'SV-M-5',is_simulated:false,failure_reason:null,paid_at:iso(60),created_at:iso(61),events:{id:E3,name:'Cancelled Picnic',group_id:G1}},
+    {id:'c6',event_id:E3,user_id:U1,amount:10000,status:'paid',payment_method:'mtn_momo',provider:'manual',payment_reference:'SV-M-6',is_simulated:false,failure_reason:null,paid_at:iso(59),created_at:iso(60),events:{id:E3,name:'Cancelled Picnic',group_id:G1}}],
+  _more:0,
   expenses:[{id:'x1',event_id:E1,amount:200000,description:'Venue deposit',receipt_path:G1+'/'+E1+'/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.pdf',recorded_by:U1,created_at:iso(20),events:{id:E1,name:'Aline & Eric Wedding',group_id:G1}}],
 };
 const get=(o,k)=>k.split('.').reduce((a,p)=>a?.[p],o);
@@ -76,13 +82,20 @@ export function createClient(){
   return {
     from:builder,
     rpc: async (name,args)=>{ window.__rpc=(window.__rpc||[]).concat([[name,args]]);
-      if(name==='collector_status') return {data:{active:true,created_at:iso(48),last_seen_at:iso(1),receipts_30d:4},error:null};
-      if(name==='claim_match_hints') return {data:[{contribution_id:'c4',receipt_id:'r1',strength:'id',receipt_amount:20000,payer_hint:'Aline U',received_at:iso(2),txn_id:'MP2610ABC123'}],error:null};
+      if(name==='collector_status') return {data:{active:true,created_at:iso(48),last_seen_at:iso(1),receipts_30d:4,auto_by_name:true},error:null};
+      if(name==='claim_match_hints') return {data:[{contribution_id:'c4',receipt_id:'r1',strength:'id',receipt_amount:20000,payer_hint:'Aline U',received_at:iso(2),txn_id:'MP2610ABC123',name_score:100}],error:null};
       if(name==='preview_momo_sms') return {data:{is_receipt:/received/i.test(args.p_message),amount:20000,txn_id:'123456789012',payer_hint:'John Doe'},error:null};
       if(name==='create_collector_token') return {data:'SVC-0123456789ABCDEF0123456789ABCDEF',error:null};
       if(name==='submit_payment_claim') return {data:'c-new',error:null};
       if(name==='event_member_progress') return {data:[{user_id:U1,role:'admin',paid_total:0,paid_count:0,pending_total:0,pending_count:0,last_paid_at:null},{user_id:U2,role:'member',paid_total:150000,paid_count:1,pending_total:20000,pending_count:1,last_paid_at:iso(5)}],error:null};
-      if(name==='list_invitations') return {data:[{id:'i1',created_by:U1,created_at:iso(24),expires_at:new Date(now+5*864e5).toISOString(),max_uses:10,use_count:3,revoked_at:null,status:'active'}],error:null};
+      if(name==='list_invitations') return {data:[{id:'i1',created_by:U1,created_at:iso(24),expires_at:new Date(now+5*864e5).toISOString(),max_uses:10,use_count:3,revoked_at:null,status:'active',code:'SV-AABBCCDDEEFF'},{id:'i0',created_by:U1,created_at:iso(240),expires_at:new Date(now+2*864e5).toISOString(),max_uses:10,use_count:1,revoked_at:null,status:'active',code:null}],error:null};
+      if(name==='list_group_photos') return {data:[{id:'p1',user_id:U2,path:G1+'/'+U2+'/cccccccc-cccc-4ccc-8ccc-cccccccccccc.jpg',caption:'Planning night',event_id:null,created_at:iso(3),like_count:2,liked_by_me:false}],error:null};
+      if(name==='toggle_photo_like') return {data:{liked:true,count:3},error:null};
+      if(name==='list_games') return {data:[
+        {id:'gm1',kind:'poll',title:'Where do we celebrate?',options:['Kigali','Musanze'],status:'open',answer:null,created_by:U2,created_at:iso(2),entries:3,my_choice:null,my_guess:null,counts:[2,1],top:null},
+        {id:'gm2',kind:'guess',title:'How much by Friday?',options:null,status:'open',answer:null,created_by:U1,created_at:iso(1),entries:2,my_choice:null,my_guess:480000,counts:null,top:null},
+        {id:'gm3',kind:'guess',title:'Guests who come?',options:null,status:'closed',answer:120,created_by:U2,created_at:iso(30),entries:2,my_choice:null,my_guess:100,counts:null,top:[{user_id:U2,guess:118,diff:2},{user_id:U1,guess:100,diff:20}]}],error:null};
+      if(name==='add_group_photo') return {data:'p-new',error:null};
       if(name==='create_invitation_code') return {data:{id:'i2',code:'SV-0123456789AB',expires_at:new Date(now+7*864e5).toISOString(),max_uses:10},error:null};
       if(name==='join_group_with_code') return {data:{ok:false,error:'invalid_code'},error:null};
       if(name==='create_savings_group') return {data:G1,error:null};
@@ -90,13 +103,20 @@ export function createClient(){
     functions:{ invoke: async (name,{body})=>{ window.__fn=(window.__fn||[]).concat([[name,body]]);
       if(name==='create-payment') return {data:{mode:'simulated',simulated:true,reference:'SV-PAY-BBBBBBBBBBBBBBBBBBBBBBBB',status:'pending'},error:null};
       return {data:{status: body.simulate==='success'?'paid':'failed'},error:null}; } },
-    storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:'about:blank#receipt'},error:null}),upload:async()=>({error:null})})},
+    storage:{from:(bucket)=>({createSignedUrl:async()=>({data:{signedUrl:'about:blank#receipt'},error:null}),
+      upload:async(path)=>{ window.__uploads=(window.__uploads||[]).concat([[bucket,path]]); return {error:null}; },
+      createSignedUrls:async(paths)=>({data:paths.map(p=>({path:p,signedUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'})),error:null}),
+      remove:async()=>({data:[],error:null})})},
     auth:{
       getSession: async()=>({data:{session},error:null}),
       onAuthStateChange(cb){ subs.push(cb); setTimeout(()=>cb('INITIAL_SESSION',session),0); return {data:{subscription:{unsubscribe(){}}}}; },
       signInWithPassword: async()=>{ session={user:{id:U1,email:'pop@example.rw'},access_token:'t'}; localStorage.setItem('fake-session',JSON.stringify(session)); subs.forEach(cb=>cb('SIGNED_IN',session)); return {data:{session},error:null}; },
       verifyOtp: async ({token_hash})=>{ if(token_hash==='bad') return {data:{},error:{message:'Token has expired or is invalid'}}; session={user:{id:U1,email:'pop@example.rw'},access_token:'t'}; localStorage.setItem('fake-session',JSON.stringify(session)); subs.forEach(cb=>cb('SIGNED_IN',session)); return {data:{session},error:null}; },
-      signUp: async(a)=>{ window.__signup=a; return {data:{session:null},error:null}; }, resetPasswordForEmail: async()=>({error:null}), updateUser: async()=>({error:null}),
+      signUp: async(a)=>{ window.__signup=a;
+        if(a.email==='exists@example.rw') return {data:{session:null,user:{id:'x',identities:[]}},error:null};
+        if(a.email==='busy@example.rw') return {data:{session:null},error:{code:'over_email_send_rate_limit',status:429,message:'email rate limit exceeded'}};
+        return {data:{session:null,user:{id:'x',identities:[{id:'i'}]}},error:null}; },
+      resend: async(a)=>{ window.__resend=a; return {error:null}; }, resetPasswordForEmail: async()=>({error:null}), updateUser: async()=>({error:null}),
       signOut: async()=>{ session=null; localStorage.removeItem('fake-session'); subs.forEach(cb=>cb('SIGNED_OUT',null)); return {error:null}; },
     },
   };
@@ -104,10 +124,11 @@ export function createClient(){
 
 const G1 = "aaaaaaaa-0000-4000-8000-000000000001";
 const E1 = "eeeeeeee-0000-4000-8000-000000000001";
+const E3 = "eeeeeeee-0000-4000-8000-000000000003";
 const ROUTES = [
   ["/dashboard", "Pop, let's save."], ["/groups", "My Groups"], [`/groups/${G1}`, "Kigali Besties"], ["/events", "Events"],
   [`/events/${E1}`, "Aline & Eric Wedding"], ["/contributions", "Contributions"], ["/expenses", "Expenses"],
-  ["/invitations", "Invitations"], ["/profile", "Profile"], ["/settings", "Settings"],
+  ["/invitations", "Invitations"], ["/squad", "Squad"], ["/profile", "Profile"], ["/settings", "Settings"],
 ];
 
 let failures = 0;
@@ -159,6 +180,37 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await page.waitForSelector(".form-msg.ok");
   const su = await page.evaluate(() => window.__signup);
   ok(su.options.data.terms_version && su.options.data.terms_accepted_at && su.options.emailRedirectTo.startsWith("http"), "sign-up records which Terms version was accepted");
+  // an already-registered email must not pretend an email was sent
+  await page.click("[data-go=signin]").catch(() => {});
+  await page.click("[data-go=signup]");
+  await page.fill("#f-display_name", "Dup");
+  await page.fill("#f-email", "exists@example.rw");
+  await page.fill("#f-password", "Passw0rd!");
+  await page.check("#f-agree");
+  await page.click('button[type="submit"]');
+  await page.waitForSelector(".form-msg.warn");
+  ok((await page.textContent(".auth-card")).includes("already has a SquadVault account") && (await page.inputValue("#f-email")) === "exists@example.rw", "existing email: told plainly, address kept, no fake 'check your inbox'");
+  // email service busy: a clear message, a cooldown, and an account-may-exist hint
+  await page.click("[data-go=signup]");
+  await page.fill("#f-display_name", "Busy");
+  await page.fill("#f-email", "busy@example.rw");
+  await page.fill("#f-password", "Passw0rd!");
+  await page.check("#f-agree");
+  await page.click('button[type="submit"]');
+  await page.waitForSelector(".form-msg.error");
+  ok((await page.textContent(".form-msg.error")).includes("email service is busy"), "email-limit error explains the service is busy, not that the person did something wrong");
+  await page.click('button[type="submit"]');
+  ok((await page.textContent("[data-msg]")).includes("Please wait"), "a second tap during the cooldown doesn't hit the service again");
+  await page.click("[data-go=signin]");
+  await page.fill("#f-email", "t@example.rw");
+  await page.fill("#f-password", "x");
+  await page.click("[data-go=signup]");
+  await page.fill("#f-display_name", "Fresh");
+  await page.fill("#f-email", "fresh@example.rw");
+  await page.fill("#f-password", "Passw0rd!");
+  await page.check("#f-agree");
+  await page.evaluate(() => { window.__t0 = true; });
+  await page.click("[data-go=signin]");
   await page.click("[data-go=forgot]").catch(() => {});
   await page.waitForSelector("form[data-form]");
   if (await page.$("[data-go=signin]")) await page.click("[data-go=signin]");
@@ -174,7 +226,8 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await shot(page, "02-dashboard-desktop");
 
   const dash = await page.textContent("#outlet");
-  ok(dash.includes("1,350,000 RWF"), "verified savings sums paid only (750,000 + 600,000 = 1,350,000 RWF; pending/failed excluded)");
+  ok(dash.includes("1,390,000 RWF"), "verified savings sums paid only (750,000 + 600,000 + 40,000 = 1,390,000 RWF; pending/failed excluded)");
+  ok(dash.includes("A cancelled event still holds money") && dash.includes("Cancelled Picnic"), "dashboard alerts the leader to a cancelled event that still holds money");
   ok(dash.includes("50,000 RWF") && dash.includes("Not counted"), "pending shown separately and labelled not counted");
 
   for (const [path, text] of ROUTES) {
@@ -255,12 +308,14 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await page.fill("#f-txn", "bad id!");
   await page.click('form[data-claim] button[type="submit"]');
   ok((await page.textContent("#err-txn")).includes("6 to 20"), "claim rejects a malformed transaction ID");
+  ok((await page.inputValue("#f-sender")) === "Pop Mugisha", "claim form asks for the MoMo name, pre-filled with the profile name");
+  await page.fill("#f-sender", "Pop M.");
   await page.fill("#f-txn", "mp2610xyz999");
   await shot(page, "04-contribute-manual");
   await page.click('form[data-claim] button[type="submit"]');
   await page.waitForSelector("text=Sent to your group leader");
   const claim = await page.evaluate(() => window.__rpc.find((r) => r[0] === "submit_payment_claim")[1]);
-  ok(claim.p_amount === 5000 && claim.p_txn_ref === "mp2610xyz999" && !("p_status" in claim) && !("p_user_id" in claim), "claim sends integer amount + txn ref, never a status or user id");
+  ok(claim.p_amount === 5000 && claim.p_txn_ref === "mp2610xyz999" && claim.p_sender_name === "Pop M." && !("p_status" in claim) && !("p_user_id" in claim), "claim sends integer amount, txn ref and MoMo name, never a status or user id");
 
   // group page: leader can add a member by email
   await page.evaluate((p) => { location.hash = p; }, `/groups/${G1}`);
@@ -289,14 +344,97 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await shot(page, "07-autocheck");
   ok((await page.textContent("[data-autocheck]")).includes("/rest/v1/rpc/ingest_momo_sms") && (await page.textContent("[data-autocheck]")).includes("SVC-0123456789ABCDEF0123456789ABCDEF"), "new secret and the forwarder settings are shown once");
 
-  // invitations
+  // invitations: the active code stays visible, so nobody has to generate extra codes
   await page.evaluate(() => { location.hash = "/invitations"; });
-  await page.waitForSelector("[data-gen]");
-  await page.click('[data-gen] button[type="submit"]');
   await page.waitForSelector(".code-box");
-  ok((await page.textContent(".code-box")).includes("SV-0123456789AB"), "new invitation code shown once in a dialog");
-  await page.keyboard.press("Escape");
-  ok((await page.textContent("#outlet")).includes("codes are hidden after creation"), "listed invitations never show codes");
+  ok((await page.textContent(".code-box")).includes("SV-AABBCCDDEEFF"), "the current invitation code is shown again without generating a new one");
+  ok((await page.textContent("#outlet")).includes("made before codes could be viewed"), "older codes that can't be shown are explained");
+  ok((await page.getAttribute("[data-wa]", "href")).includes("wa.me") , "share-on-WhatsApp link is offered");
+  await page.click("details.more summary");
+  await page.click('[data-gen] button[type="submit"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "create_invitation_code")), "a new code is only made when the leader asks for one");
+
+  // squad hub: chat, photos, games
+  await page.evaluate(() => { location.hash = "/squad"; });
+  await page.waitForSelector(".chat .msg");
+  const chat = await page.textContent(".chat-log");
+  ok(chat.includes("Hello <b>squad</b>") && chat.includes("Welcome!"), "chat shows messages as plain text (no HTML injection)");
+  await page.fill("#chat-body", "See you at the party");
+  await page.press("#chat-body", "Enter");
+  await page.waitForTimeout(300);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "post_group_message" && r[1].p_body === "See you at the party" && r[1].p_group_id)), "pressing Enter sends the message through post_group_message");
+  await shot(page, "09-chat");
+  await page.click('[data-tab="photos"]');
+  await page.waitForSelector(".photo-grid");
+  await page.waitForFunction(() => document.querySelector(".ph-img img")?.getAttribute("src")?.startsWith("data:"));
+  ok(true, "photo wall loads pictures through signed URLs");
+  await page.click("[data-like]");
+  await page.waitForTimeout(150);
+  ok((await page.textContent("[data-like]")).trim() === "3" && (await page.getAttribute("[data-like]", "aria-pressed")) === "true", "heart toggles and shows the new count");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.setInputFiles("#photo-file", { name: "a.png", mimeType: "image/png", buffer: png });
+  await page.waitForSelector(".upload-preview");
+  await page.fill("#f-caption", "Fun times");
+  await page.click('.dialog button[type="submit"]');
+  await page.waitForTimeout(500);
+  const up = await page.evaluate(() => ({ u: window.__uploads, r: window.__rpc.find((r) => r[0] === "add_group_photo")?.[1] }));
+  ok(up.u?.[0]?.[0] === "group-photos" && /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png)$/.test(up.u[0][1]) && up.r?.p_caption === "Fun times", "photo upload goes to <group>/<me>/<file> in the private bucket, then is registered");
+  await page.click('[data-tab="games"]');
+  await page.waitForSelector(".opt");
+  const games = await page.textContent("#outlet");
+  ok(games.includes("Where do we celebrate?") && games.includes("2 · 67%") && games.includes("Your guess"), "games: poll results and a guess box are shown");
+  ok(games.includes("The answer was") && games.includes("off by 2") && games.includes("Exact!") === false, "games: a revealed guess game shows the answer and the closest guess");
+  await page.click('[data-vote="2"]');
+  await page.waitForTimeout(200);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "play_game" && r[1].p_choice === 2 && r[1].p_game_id === "gm1")), "voting calls play_game with the chosen option");
+  await page.fill('form[data-guess="gm2"] input', "5x");
+  await page.click('form[data-guess="gm2"] button[type="submit"]');
+  ok((await page.textContent("#err-guess")).includes("whole number"), "a guess must be a whole number");
+  await page.click("[data-new-game]");
+  await page.fill("#f-title", "Ok?");
+  await page.fill("#f-options", "only one");
+  await page.click('.dialog button[type="submit"]');
+  ok((await page.textContent("#err-options")).includes("between 2 and 6"), "a poll needs 2 to 6 options");
+  await page.fill("#f-options", "Yes\nNo");
+  await page.click('.dialog button[type="submit"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "create_game" && r[1].p_kind === "poll" && r[1].p_options?.length === 2)), "creating a poll calls create_game");
+  await page.click('[data-close="gm2"]');
+  await page.fill("#f-answer", "500,000");
+  await page.click('.dialog button[type="submit"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "close_game" && r[1].p_answer === 500000)), "revealing a guess game sends the real answer");
+
+  // cancelled event: the page automatically offers to return the money
+  await page.evaluate((p) => { location.hash = p; }, `/events/${E3}`);
+  await page.waitForSelector("[data-return]");
+  const rt = await page.textContent("#outlet");
+  ok(rt.includes("This event was cancelled. Return the money to your members?") && rt.includes("40,000 RWF") && (await page.$$("[data-return]")).length === 2, "cancelled event with money: leader is prompted to return it, one row per payment");
+  ok(rt.includes("MoMo name “Aline Uwase”") && rt.includes("MP2610PAID01"), "return rows show who paid and the transaction ID");
+  ok(await page.isVisible(".cover.hero"), "event picture shows on the event page");
+  await page.click("[data-return]");
+  await page.click('.dialog button[type="submit"]');
+  ok((await page.textContent("#err-sent")).includes("Tick this"), "returning requires confirming the money was really sent back");
+  await page.check("#f-sent");
+  await page.click('.dialog button[type="submit"]');
+  await page.waitForTimeout(250);
+  const rf = await page.evaluate(() => window.__rpc.filter((r) => r[0] === "review_contribution").pop()?.[1]);
+  ok(rf?.p_decision === "refunded" && /^Returned: /.test(rf.p_reason), "marking returned calls review_contribution(refunded) with a reason");
+  await page.click("[data-return-all]");
+  await page.click("[data-ok]");
+  await page.waitForTimeout(300);
+  ok((await page.evaluate(() => window.__rpc.filter((r) => r[0] === "review_contribution" && r[1].p_decision === "refunded").length)) >= 3, "\"I've returned everything\" records each remaining payment");
+  // event form has a picture field and uploads it
+  await page.evaluate((p) => { location.hash = p; }, `/events/${E1}`);
+  await page.waitForSelector("[data-edit]");
+  await page.click("[data-edit]");
+  await page.fill("#f-pay_account", "0788123456");
+  await page.setInputFiles("#f-cover", { name: "c.png", mimeType: "image/png", buffer: png });
+  await page.click('.dialog button[type="submit"]');
+  await page.waitForTimeout(500);
+  const cv = await page.evaluate(() => window.__rpc.find((r) => r[0] === "set_event_cover")?.[1]);
+  ok(cv?.p_event_id && /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png)$/.test(cv.p_path ?? ""), "choosing an event picture uploads it and attaches it with set_event_cover");
 
   ok(errors.length === 0, `no console/page errors on desktop ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ""}`);
 

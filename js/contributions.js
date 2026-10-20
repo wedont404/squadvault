@@ -107,7 +107,7 @@ export async function renderContributions({ outlet, query, isCurrent }) {
             <p>${formatRWF(amount)} for ${cur.name} matched the leader's MoMo message and now counts toward the target. Thank you!</p></div>
             <button class="btn primary" type="button" data-again>Contribute again</button></div>`
           : html`<div class="stack" style="text-align:center;justify-items:center"><div class="empty" style="border:0"><div class="ico">${icon("clock")}</div><h3>Sent to your group leader</h3>
-            <p>${formatRWF(amount)} for ${cur.name}. It counts toward the target as soon as the leader confirms it${txnGiven ? " or the matching MoMo message arrives" : ""}. You'll see it as Verified in your history.</p></div>
+            <p>${formatRWF(amount)} for ${cur.name}. It counts toward the target as soon as the leader confirms it or the matching MoMo message arrives${txnGiven ? "" : " (your name and amount are checked automatically)"}. You'll see it as Verified in your history.</p></div>
             <button class="btn primary" type="button" data-again>Contribute again</button></div>`);
         refreshHistory(); refreshSummary();
       });
