@@ -1212,6 +1212,616 @@ select t.expect_err($$select public.list_rooms(gen_random_uuid())$$, 'permission
 select t.expect_err($$select public.make_move(gen_random_uuid(), 1)$$, 'permission denied');
 reset role;
 
+-- ===== 013: game night part 2 (clash, penalty, race, emoji, vibes, risk it + squad coins) ==========
+reset role;
+-- ---- coins ----
+reset role;
+select set_config('request.jwt.claim.sub', 'ffffffff-ffff-ffff-ffff-ffffffffffff', true);
+set local role authenticated;
+select t.expect_err($$select public.my_wallet(current_setting('t.g')::uuid)$$, 'not_allowed');
+select t.expect_err($$select public.claim_daily_coins(current_setting('t.g')::uuid)$$, 'not_allowed');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select t.expect_err($$select * from public.squad_wallets$$, 'permission denied');
+select t.expect_err($$update public.squad_wallets set balance = 999999$$, 'permission denied');
+select t.expect_err($$select * from public.vibe_prompts$$, 'permission denied');
+do $$ begin
+  assert (public.my_wallet(current_setting('t.g')::uuid) ->> 'balance')::int = 200, 'everyone starts with 200 coins';
+  assert (public.my_wallet(current_setting('t.g')::uuid) ->> 'can_claim')::boolean, 'daily coins are available';
+  assert public.claim_daily_coins(current_setting('t.g')::uuid) = 250, 'daily claim adds 50';
+end $$;
+select t.expect_err($$select public.claim_daily_coins(current_setting('t.g')::uuid)$$, 'already_claimed');
+do $$ begin assert not (public.my_wallet(current_setting('t.g')::uuid) ->> 'can_claim')::boolean, 'one claim a day'; end $$;
+select t.expect_err($$select public.create_room(current_setting('t.g')::uuid, 'pot', 0)$$, 'invalid_stake');
+select t.expect_err($$select public.create_room(current_setting('t.g')::uuid, 'pot', 33)$$, 'invalid_stake');
+select t.expect_err($$select public.create_room(current_setting('t.g')::uuid, 'tictactoe', 10)$$, 'invalid_stake');
+select t.expect_err($$select public.create_room(current_setting('t.g')::uuid, 'pot', 500)$$, 'invalid_stake');
+
+-- ---- Risk It: stake, hidden dice, a split pot, refunds ----
+select public.create_room(:'g', 'pot', 25) as p1 \gset
+select set_config('t.p1', :'p1', true);
+do $$ begin assert (public.my_wallet(current_setting('t.g')::uuid) ->> 'balance')::int = 225, 'host stake leaves the wallet'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'p1');
+select public.join_room(:'p1');
+do $$ begin assert (public.my_wallet(current_setting('t.g')::uuid) ->> 'balance')::int = 175, 'joining twice only charges once'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.join_room(:'p1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'p1');
+do $$
+declare g jsonb := public.get_room(current_setting('t.p1')::uuid);
+begin
+  assert g -> 'state' ->> 'phase' = 'roll' and (g -> 'state' ->> 'pot')::int = 75, 'pot is 3 x 25';
+  assert jsonb_array_length(g -> 'my_dice' -> 'd') = 2, 'I can see my own dice';
+  assert g::text not like '%rolls%' and g::text not like '%secret%', 'nobody else''s dice are sent';
+end $$;
+reset role;
+update public.game_rooms set secret = jsonb_set(secret, '{rolls}', jsonb_build_object(
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', jsonb_build_object('d', jsonb_build_array(6, 6), 'rerolled', false, 'decided', false),
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', jsonb_build_object('d', jsonb_build_array(3, 4), 'rerolled', false, 'decided', false),
+  '71717171-7171-7171-7171-717171717171', jsonb_build_object('d', jsonb_build_array(3, 4), 'rerolled', false, 'decided', false))) where id = :'p1';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select t.expect_err($$select public.make_move(current_setting('t.p1')::uuid, 5)$$, 'invalid_move');
+select public.make_move(:'p1', 0);
+select t.expect_err($$select public.make_move(current_setting('t.p1')::uuid, 1)$$, 'already_moved');
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'p1', 0);
+do $$ begin assert public.get_room(current_setting('t.p1')::uuid) ->> 'status' = 'playing', 'still waiting for the last player'; end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.make_move(:'p1', 0);
+do $$
+declare g jsonb := public.get_room(current_setting('t.p1')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g ->> 'winner_id' = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'double sixes win';
+  assert (select (e ->> 'total')::int from jsonb_array_elements(g -> 'state' -> 'results') e where e ->> 'user_id' = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 13, 'double six counts 13';
+  assert (g -> 'state' ->> 'pot')::int = 75, 'pot size shown';
+end $$;
+reset role;
+do $$ begin
+  assert (select balance from public.squad_wallets where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' and group_id = current_setting('t.g')::uuid) = 300, 'winner takes the pot (225 + 75)';
+  assert (select balance from public.squad_wallets where user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' and group_id = current_setting('t.g')::uuid) = 175, 'losers keep what is left';
+end $$;
+
+-- a tie splits the pot and snake eyes count 0; one re-roll is allowed and is final
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'pot', 10) as p2 \gset
+select set_config('t.p2', :'p2', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'p2');
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.join_room(:'p2');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'p2');
+reset role;
+update public.game_rooms set secret = jsonb_set(secret, '{rolls}', jsonb_build_object(
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', jsonb_build_object('d', jsonb_build_array(4, 3), 'rerolled', false, 'decided', false),
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', jsonb_build_object('d', jsonb_build_array(5, 2), 'rerolled', false, 'decided', false),
+  '71717171-7171-7171-7171-717171717171', jsonb_build_object('d', jsonb_build_array(1, 1), 'rerolled', false, 'decided', false))) where id = :'p2';
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.make_move(:'p2', 1);   -- snake eyes: gamble on a re-roll
+do $$
+declare g jsonb := public.get_room(current_setting('t.p2')::uuid);
+begin
+  assert (g -> 'my_dice' ->> 'rerolled')::boolean, 're-roll is recorded';
+end $$;
+select t.expect_err($$select public.make_move(current_setting('t.p2')::uuid, 1)$$, 'already_moved');
+reset role;
+-- make the re-roll known so the split can be asserted, then let the clock run out for the others
+update public.game_rooms set secret = jsonb_set(secret, '{rolls,71717171-7171-7171-7171-717171717171,d}', '[1,2]'::jsonb),
+  state = jsonb_set(state, '{until}', to_jsonb(now() - interval '1 second')) where id = :'p2';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+do $$
+declare g jsonb := public.get_room(current_setting('t.p2')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g -> 'state' ->> 'phase' = 'done', 'time is up: the dice are shown';
+  assert g ->> 'winner_id' is null and jsonb_array_length(g -> 'state' -> 'winners') = 2, 'a tie has no single winner';
+end $$;
+reset role;
+do $$ begin
+  assert (select balance from public.squad_wallets where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' and group_id = current_setting('t.g')::uuid) = 305, 'A: 300 - 10 + 15';
+  assert (select balance from public.squad_wallets where user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' and group_id = current_setting('t.g')::uuid) = 180, 'B: 175 - 10 + 15';
+  assert (select balance from public.squad_wallets where user_id = '71717171-7171-7171-7171-717171717171' and group_id = current_setting('t.g')::uuid) = 165, 'L: 175 - 10';
+  assert (select sum(balance) from public.squad_wallets where group_id = current_setting('t.g')::uuid and user_id in ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','71717171-7171-7171-7171-717171717171')) = 650, 'coins are only moved, never created';
+end $$;
+
+-- lobby money rules: leaving or closing a table returns the stake, a broke player can't join, a live pot can't be closed
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'pot', 50) as p3 \gset
+select set_config('t.p3', :'p3', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'p3');
+select public.leave_room(:'p3');
+do $$ begin assert (public.my_wallet(current_setting('t.g')::uuid) ->> 'balance')::int = 180, 'leaving the lobby refunds the stake'; end $$;
+reset role;
+update public.squad_wallets set balance = 5 where user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' and group_id = :'g';
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select t.expect_err($$select public.join_room(current_setting('t.p3')::uuid)$$, 'not_enough_coins');
+do $$ begin assert (public.my_wallet(current_setting('t.g')::uuid) ->> 'balance')::int = 5, 'a failed join costs nothing'; end $$;
+reset role;
+update public.squad_wallets set balance = 180 where user_id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' and group_id = :'g';
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'p3');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'p3');
+select t.expect_err($$select public.delete_room(current_setting('t.p3')::uuid)$$, 'game_started');
+reset role;
+update public.game_rooms set state = jsonb_set(state, '{until}', to_jsonb(now() - interval '1 second')) where id = :'p3';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.get_room(:'p3');
+select public.create_room(:'g', 'pot', 10) as p4 \gset
+select set_config('t.p4', :'p4', true);
+reset role;
+do $$ begin assert (select status from public.game_rooms where id = current_setting('t.p3')::uuid) = 'finished', 'the clock settles a live pot'; end $$;
+-- six hours of silence closes an unstarted table and returns the stake
+update public.game_rooms set updated_at = now() - interval '7 hours' where id = :'p4';
+select balance as before_a from public.squad_wallets where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' and group_id = :'g' \gset
+select set_config('t.before_a', :'before_a', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.list_rooms(:'g');
+reset role;
+do $$ begin
+  assert (select status from public.game_rooms where id = current_setting('t.p4')::uuid) = 'finished', 'stale lobby closed';
+  assert (select balance from public.squad_wallets where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' and group_id = current_setting('t.g')::uuid) = current_setting('t.before_a')::int + 10, 'the stale table returned the host''s stake';
+end $$;
+
+-- ---- Clash ----
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'clash') as c1 \gset
+select set_config('t.c1', :'c1', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'c1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'c1');
+select t.expect_err($$select public.make_move(current_setting('t.c1')::uuid, 9)$$, 'invalid_move');
+select public.make_move(:'c1', 1);
+select t.expect_err($$select public.make_move(current_setting('t.c1')::uuid, 2)$$, 'already_moved');
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+do $$
+declare g jsonb := public.get_room(current_setting('t.c1')::uuid);
+begin
+  assert g -> 'my_choice' = 'null'::jsonb and g -> 'state' -> 'moved' = '[0]'::jsonb, 'B can''t see A''s move, only that A has picked';
+  assert g::text not like '%choices%', 'no secret column in the payload';
+end $$;
+select public.make_move(:'c1', 3);   -- guard vs strike: strike is cut to a quarter and the striker eats a counter
+do $$
+declare g jsonb := public.get_room(current_setting('t.c1')::uuid);
+begin
+  assert (g -> 'state' -> 'hp' ->> 1)::int between 94 and 96, 'guard cuts a strike down to about a quarter';
+  assert (g -> 'state' -> 'hp' ->> 0)::int = 92, 'the striker takes the 8 damage counter';
+  assert (g -> 'state' ->> 'round')::int = 2, 'next round';
+end $$;
+select public.make_move(:'c1', 1);   -- B strikes while A goes heavy: the strike interrupts the heavy
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.make_move(:'c1', 2);
+do $$
+declare g jsonb := public.get_room(current_setting('t.c1')::uuid);
+begin
+  assert (g -> 'state' -> 'hp' ->> 0)::int between 70 and 78, 'A takes the full strike';
+  assert (g -> 'state' -> 'last' -> 'dmg' ->> 1)::int = 0, 'the interrupted heavy did nothing';
+end $$;
+select public.make_move(:'c1', 4);   -- heal vs guard
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'c1', 3);
+do $$
+declare g jsonb := public.get_room(current_setting('t.c1')::uuid);
+begin
+  assert (g -> 'state' -> 'heals' ->> 0)::int = 1, 'one heal used';
+  assert (g -> 'state' -> 'last' -> 'heal' ->> 0)::int between 18 and 24, 'heal is 18 to 24';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.make_move(:'c1', 4);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'c1', 3);
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select t.expect_err($$select public.make_move(current_setting('t.c1')::uuid, 4)$$, 'invalid_move');
+reset role;
+update public.game_rooms set state = jsonb_set(state, '{hp}', '[100,10]'::jsonb) where id = :'c1';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.make_move(:'c1', 2);   -- heavy breaks through a guard
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'c1', 3);
+do $$
+declare g jsonb := public.get_room(current_setting('t.c1')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g ->> 'winner_id' = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'heavy breaks guard for the KO';
+  assert (g -> 'state' -> 'hp' ->> 1)::int = 0, 'health never shows below zero';
+end $$;
+-- twelve rounds with nobody ahead is a draw
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'clash') as c2 \gset
+select set_config('t.c2', :'c2', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'c2');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'c2');
+reset role;
+update public.game_rooms set state = jsonb_set(state, '{round}', '12') where id = :'c2';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.make_move(:'c2', 3);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'c2', 3);
+do $$
+declare g jsonb := public.get_room(current_setting('t.c2')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g ->> 'winner_id' is null, 'equal health after the last round is a draw';
+end $$;
+
+-- ---- Penalty Kings ----
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'penalty') as f1 \gset
+select set_config('t.f1', :'f1', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'f1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'f1');
+select t.expect_err($$select public.make_move(current_setting('t.f1')::uuid, 3)$$, 'invalid_move');
+select public.make_move(:'f1', 0);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+do $$
+declare g jsonb := public.get_room(current_setting('t.f1')::uuid);
+begin
+  assert g -> 'my_choice' = 'null'::jsonb and g -> 'state' -> 'moved' = '[0]'::jsonb, 'the keeper can''t see where the shooter aims';
+end $$;
+select public.make_move(:'f1', 1);
+do $$
+declare g jsonb := public.get_room(current_setting('t.f1')::uuid);
+begin
+  assert (g -> 'state' ->> 'kick')::int = 1, 'kick 2 is next';
+  assert g -> 'state' -> 'hist' -> 0 ->> 'r' in ('goal', 'missed'), 'aimed left, keeper went middle: a goal unless it flew wide';
+end $$;
+-- play the whole shootout (the server rolls a 12% chance of a miss, so only the rules are asserted)
+do $$
+declare i integer; rid uuid := current_setting('t.f1')::uuid; g jsonb; goals0 integer; goals1 integer;
+begin
+  for i in 1..40 loop
+    g := public.get_room(rid);
+    exit when g ->> 'status' = 'finished';
+    perform set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+    perform public.make_move(rid, 0);
+    perform set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+    perform public.make_move(rid, 1);
+  end loop;
+  g := public.get_room(rid);
+  assert g ->> 'status' = 'finished', 'the shootout ends';
+  assert (g -> 'state' ->> 'kick')::int between 10 and 20 and (g -> 'state' ->> 'kick')::int % 2 = 0, 'at least five kicks each, then pairs of sudden death';
+  select count(*) filter (where e ->> 's' = '0' and e ->> 'r' = 'goal'), count(*) filter (where e ->> 's' = '1' and e ->> 'r' = 'goal')
+    into goals0, goals1 from jsonb_array_elements(g -> 'state' -> 'hist') e;
+  assert (g -> 'state' -> 'scores' ->> 0)::int = goals0 and (g -> 'state' -> 'scores' ->> 1)::int = goals1, 'score matches the goals in the history';
+  assert (goals0 > goals1 and g ->> 'winner_id' = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+      or (goals1 > goals0 and g ->> 'winner_id' = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
+      or (goals0 = goals1 and g ->> 'winner_id' is null), 'the winner has more goals';
+end $$;
+
+-- ---- Street race ----
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'race') as s1 \gset
+select set_config('t.s1', :'s1', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'s1');
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.join_room(:'s1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'s1');
+select t.expect_err($$select public.make_move(current_setting('t.s1')::uuid, 0)$$, 'invalid_move');
+select public.make_move(:'s1', 3);
+select t.expect_err($$select public.make_move(current_setting('t.s1')::uuid, 1)$$, 'already_moved');
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+do $$
+declare g jsonb := public.get_room(current_setting('t.s1')::uuid);
+begin
+  assert g -> 'state' ->> 'round' = '1' and jsonb_array_length(g -> 'state' -> 'answered') = 2, 'waiting for the last driver';
+  assert g -> 'state' -> 'pos' = '{"0":0,"1":0,"2":0}'::jsonb, 'nobody moves until everyone has picked';
+  assert g -> 'my_choice' = '1'::jsonb, 'I can see my own gear';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+do $$
+declare g jsonb := public.get_room(current_setting('t.s1')::uuid);
+begin
+  assert g -> 'state' -> 'pos' = '{"0":9,"1":3,"2":3}'::jsonb, 'nitro is +9, cruise is +3';
+  assert (g -> 'state' ->> 'round')::int = 2 and g -> 'state' -> 'used' ? '0', 'round 2, and A''s nitro is spent';
+  assert g -> 'my_choice' = 'null'::jsonb, 'new round, fresh pick';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select t.expect_err($$select public.make_move(current_setting('t.s1')::uuid, 3)$$, 'invalid_move');
+select public.make_move(:'s1', 2);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+do $$
+declare g jsonb := public.get_room(current_setting('t.s1')::uuid);
+begin
+  assert (g -> 'state' -> 'pos' ->> '0')::int in (16, 7), 'boost is +7 or a spin-out of -2';
+  assert g -> 'state' -> 'last' -> 0 ->> 'gear' = '2', 'last round is shown';
+end $$;
+reset role;
+update public.game_rooms set state = jsonb_set(state, '{pos}', '{"0":28,"1":3,"2":3}'::jsonb) where id = :'s1';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.make_move(:'s1', 1);
+do $$
+declare g jsonb := public.get_room(current_setting('t.s1')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g ->> 'winner_id' = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'first across the line wins';
+end $$;
+-- the clock picks cruise for people who froze
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'race') as s2 \gset
+select set_config('t.s2', :'s2', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'s2');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'s2');
+reset role;
+update public.game_rooms set state = jsonb_set(state, '{until}', to_jsonb(now() - interval '1 second')) where id = :'s2';
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+do $$
+declare g jsonb := public.get_room(current_setting('t.s2')::uuid);
+begin
+  assert g -> 'state' -> 'pos' = '{"0":3,"1":3}'::jsonb and (g -> 'state' ->> 'round')::int = 2, 'time is up: everyone who froze cruises';
+end $$;
+
+-- ---- Emoji decode uses emoji puzzles, trivia never does ----
+reset role;
+update public.game_rooms set status = 'finished', finished_at = now() where status <> 'finished' and host_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'emoji') as e1 \gset
+select set_config('t.e1', :'e1', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'e1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'e1');
+reset role;
+do $$ begin
+  assert not exists (select 1 from public.trivia_questions q, jsonb_array_elements_text((select secret -> 'ids' from public.game_rooms where id = current_setting('t.e1')::uuid)) i where q.id = i::int and q.topic <> 'Emoji'), 'emoji rooms only get emoji puzzles';
+  assert not exists (select 1 from public.trivia_questions q, jsonb_array_elements_text((select secret -> 'ids' from public.game_rooms where id = current_setting('t.r4')::uuid)) i where q.id = i::int and q.topic = 'Emoji'), 'trivia rooms never get emoji puzzles';
+end $$;
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.make_move(:'e1', 0);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'e1', 1);
+do $$ begin assert public.get_room(current_setting('t.e1')::uuid) -> 'state' ->> 'phase' = 'reveal', 'emoji decode reveals once both answered'; end $$;
+
+-- ---- Main Character (most likely to) ----
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'likely') as v1 \gset
+select set_config('t.v1', :'v1', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'v1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select t.expect_err($$select public.start_room(current_setting('t.v1')::uuid)$$, 'not_enough_players');
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.join_room(:'v1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'v1');
+do $$
+declare g jsonb := public.get_room(current_setting('t.v1')::uuid);
+begin
+  assert g -> 'state' ->> 'prompt' like 'Most likely to%' and (g -> 'state' ->> 'total')::int = 6, 'six rounds of "most likely to"';
+  assert not (g -> 'state' ? 'votes'), 'votes are hidden during the round';
+end $$;
+select t.expect_err($$select public.make_move(current_setting('t.v1')::uuid, 7)$$, 'invalid_move');
+select public.make_move(:'v1', 1);
+select t.expect_err($$select public.make_move(current_setting('t.v1')::uuid, 2)$$, 'already_moved');
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'v1', 1);
+reset role;
+select set_config('request.jwt.claim.sub', '71717171-7171-7171-7171-717171717171', true);
+set local role authenticated;
+select public.make_move(:'v1', 0);
+do $$
+declare g jsonb := public.get_room(current_setting('t.v1')::uuid);
+begin
+  assert g -> 'state' ->> 'phase' = 'reveal' and (g -> 'state' ->> 'top')::int = 2, 'B got 2 votes';
+  assert (select (p ->> 'score')::int from jsonb_array_elements(g -> 'players') p where p ->> 'seat' = '1') = 1, 'the most-voted person wears the crown';
+  assert (select (p ->> 'score')::int from jsonb_array_elements(g -> 'players') p where p ->> 'seat' = '0') = 0, 'nobody else scores';
+end $$;
+reset role;
+update public.game_rooms set state = state || jsonb_build_object('q', 5, 'phase', 'reveal', 'until', now() - interval '1 second') where id = :'v1';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+do $$
+declare g jsonb := public.get_room(current_setting('t.v1')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g ->> 'winner_id' = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'most crowns wins';
+end $$;
+
+-- ---- Hot Takes (would you rather) ----
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.create_room(:'g', 'rather') as w1 \gset
+select set_config('t.w1', :'w1', true);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.join_room(:'w1');
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+select public.start_room(:'w1');
+do $$
+declare g jsonb := public.get_room(current_setting('t.w1')::uuid);
+begin
+  assert g -> 'state' ->> 'option_a' is not null and g -> 'state' ->> 'option_b' is not null, 'two sides to pick from';
+end $$;
+select t.expect_err($$select public.make_move(current_setting('t.w1')::uuid, 2)$$, 'invalid_move');
+select public.make_move(:'w1', 0);
+reset role;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', true);
+set local role authenticated;
+select public.make_move(:'w1', 0);
+do $$
+declare g jsonb := public.get_room(current_setting('t.w1')::uuid);
+begin
+  assert (g -> 'state' ->> 'a')::int = 2 and (g -> 'state' ->> 'b')::int = 0 and (g -> 'state' ->> 'majority')::int = 0, 'majority side is A';
+  assert (select sum((p ->> 'score')::int) from jsonb_array_elements(g -> 'players') p) = 2, 'both majority voters score';
+end $$;
+reset role;
+update public.game_rooms set state = state || jsonb_build_object('q', 5, 'phase', 'reveal', 'until', now() - interval '1 second') where id = :'w1';
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+do $$
+declare g jsonb := public.get_room(current_setting('t.w1')::uuid);
+begin
+  assert g ->> 'status' = 'finished' and g ->> 'winner_id' is null, 'level scores are a draw';
+end $$;
+
+-- ---- lobby screen now carries coins and the rich list ----
+reset role;
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', true);
+set local role authenticated;
+do $$
+declare l jsonb := public.list_rooms(current_setting('t.g')::uuid);
+begin
+  assert (l -> 'wallet' ->> 'balance')::int >= 0, 'wallet in the lobby payload';
+  assert jsonb_array_length(l -> 'rich') >= 3, 'rich list';
+  assert (l -> 'rich' -> 0 ->> 'balance')::int >= (l -> 'rich' -> 1 ->> 'balance')::int, 'rich list is sorted';
+  assert l::text not like '%secret%' and l::text not like '%rolls%', 'still no secrets';
+end $$;
+reset role;
+
 -- anon has nothing
 set local role anon;
 select t.expect_err($$select * from public.events$$, 'permission denied');

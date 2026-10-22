@@ -399,3 +399,47 @@ details.more > summary::-webkit-details-marker { display: none; }
 .opt.right { border-color: var(--green); background: var(--ok-bg); }
 .opt.wrong { border-color: var(--danger); background: var(--danger-bg); }
 .win-banner { border-color: rgba(183, 255, 69, 0.35); }
+
+/* ---- Game night part 2 (update 013) ---- */
+.wallet-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: var(--r-md); border: 1px solid rgba(251, 191, 36, 0.35); background: var(--warn-bg); }
+.hpbox { display: grid; gap: 6px; }
+.hp { height: 14px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; }
+.hp > i { display: block; height: 100%; background: linear-gradient(90deg, #ff6b7a, #fbbf24 50%, var(--green)); transition: width .5s var(--ease); }
+.clash-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 520px; margin-inline: auto; }
+.rps-btn small { font-size: var(--fs-xs); }
+.kicks { letter-spacing: 3px; font-size: 1.05rem; }
+.lane { display: grid; gap: 4px; }
+.track { position: relative; height: 34px; border-radius: var(--r-pill); background: repeating-linear-gradient(90deg, var(--surface-3) 0 14px, var(--surface-2) 14px 28px); overflow: hidden; }
+.track > i { position: absolute; inset: 0 auto 0 0; background: var(--ok-bg); transition: width .5s var(--ease); }
+.track .car { position: absolute; top: 2px; font-size: 24px; transition: left .5s var(--ease); }
+.track .flag { position: absolute; right: 6px; top: 4px; font-size: 20px; }
+.big-opt { padding: 16px 14px; font-size: 1.02rem; }
+.dice-big { text-align: center; font-size: clamp(64px, 20vw, 110px); line-height: 1.1; margin: var(--s3) 0; letter-spacing: 8px; }
+.dice-cell { font-size: 1.6rem; }
+.pot-head { text-align: center; padding: 14px; border-radius: var(--r-md); border: 1px solid rgba(251, 191, 36, 0.35); background: var(--warn-bg); }
+.win-row td { background: var(--ok-bg); }
+.opt .bar { z-index: 0; }
+.opt .label, .opt .n { z-index: 1; }
+.opt .label .avatar { vertical-align: middle; margin-right: 6px; }
+
+/* ---- Game night part 2 (update 013) ---- */
+.wallet-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: var(--r-md); border: 1px solid rgba(251, 191, 36, 0.35); background: var(--warn-bg); }
+.hpbox { display: grid; gap: 6px; }
+.hp { height: 14px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; }
+.hp > i { display: block; height: 100%; background: linear-gradient(90deg, #ff6b7a, #fbbf24 50%, var(--green)); transition: width .5s var(--ease); }
+.clash-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 520px; margin-inline: auto; }
+.rps-btn small { font-size: var(--fs-xs); }
+.kicks { letter-spacing: 3px; font-size: 1.05rem; }
+.lane { display: grid; gap: 4px; }
+.track { position: relative; height: 34px; border-radius: var(--r-pill); background: repeating-linear-gradient(90deg, var(--surface-3) 0 14px, var(--surface-2) 14px 28px); overflow: hidden; }
+.track > i { position: absolute; inset: 0 auto 0 0; background: var(--ok-bg); transition: width .5s var(--ease); }
+.track .car { position: absolute; top: 2px; font-size: 24px; transition: left .5s var(--ease); }
+.track .flag { position: absolute; right: 6px; top: 4px; font-size: 20px; }
+.big-opt { padding: 16px 14px; font-size: 1.02rem; }
+.dice-big { text-align: center; font-size: clamp(64px, 20vw, 110px); line-height: 1.1; margin: var(--s3) 0; letter-spacing: 8px; }
+.dice-cell { font-size: 1.6rem; }
+.pot-head { text-align: center; padding: 14px; border-radius: var(--r-md); border: 1px solid rgba(251, 191, 36, 0.35); background: var(--warn-bg); }
+.win-row td { background: var(--ok-bg); }
+.opt .bar { z-index: 0; }
+.opt .label, .opt .n { z-index: 1; }
+.opt .label .avatar { vertical-align: middle; margin-right: 6px; }

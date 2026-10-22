@@ -96,8 +96,9 @@ export function createClient(){
         {id:'gm1',kind:'poll',title:'Where do we celebrate?',options:['Kigali','Musanze'],status:'open',answer:null,created_by:U2,created_at:iso(2),entries:3,my_choice:null,my_guess:null,counts:[2,1],top:null},
         {id:'gm2',kind:'guess',title:'How much by Friday?',options:null,status:'open',answer:null,created_by:U1,created_at:iso(1),entries:2,my_choice:null,my_guess:480000,counts:null,top:null},
         {id:'gm3',kind:'guess',title:'Guests who come?',options:null,status:'closed',answer:120,created_by:U2,created_at:iso(30),entries:2,my_choice:null,my_guess:100,counts:null,top:[{user_id:U2,guess:118,diff:2},{user_id:U1,guess:100,diff:20}]}],error:null};
-      if(name==='list_rooms') return {data:{rooms:[{id:'rm1',kind:'trivia',status:'lobby',host_id:U2,winner_id:null,created_at:iso(1),max_players:12,abandoned:false,in_room:false,players:[{user_id:U2,seat:0,score:0,name:'Aline <b>U</b>'}]}],leaderboard:[{user_id:U2,name:'Aline U',wins:3,played:5},{user_id:U1,name:'Pop Mugisha',wins:1,played:2}]},error:null};
-      if(name==='create_room') { window.__room={id:'rmNew',kind:args.p_kind,status:'lobby',host_id:U1,winner_id:null,max_players:2,state:{},me_seat:0,in_room:true,my_answer:null,my_choice:null,players:[{user_id:U1,seat:0,score:0,name:'Pop Mugisha',avatar_path:null}]}; return {data:'rmNew',error:null}; }
+      if(name==='claim_daily_coins') return {data:250,error:null};
+      if(name==='list_rooms') return {data:{wallet:{balance:200,can_claim:true},rich:[{user_id:U2,name:'Aline U',balance:340},{user_id:U1,name:'Pop Mugisha',balance:200}],rooms:[{id:'rm1',kind:'trivia',status:'lobby',host_id:U2,winner_id:null,created_at:iso(1),max_players:12,abandoned:false,in_room:false,players:[{user_id:U2,seat:0,score:0,name:'Aline <b>U</b>'}]}],leaderboard:[{user_id:U2,name:'Aline U',wins:3,played:5},{user_id:U1,name:'Pop Mugisha',wins:1,played:2}]},error:null};
+      if(name==='create_room') { window.__room={id:'rmNew',kind:args.p_kind,stake:args.p_stake||0,status:'lobby',host_id:U1,winner_id:null,max_players:args.p_kind==='pot'?10:2,state:{},me_seat:0,in_room:true,my_answer:null,my_choice:null,players:[{user_id:U1,seat:0,score:0,name:'Pop Mugisha',avatar_path:null}]}; return {data:'rmNew',error:null}; }
       if(name==='get_room') return window.__room ? {data:{...window.__room,server_now:new Date().toISOString()},error:null} : {data:null,error:{message:'not_allowed',code:'42501'}};
       if(['make_move','start_room','join_room','leave_room','delete_room'].includes(name)) return {data:null,error:null};
       if(name==='add_group_photo') return {data:'p-new',error:null};
@@ -482,6 +483,18 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   const U1 = "11111111-1111-4111-8111-111111111111", U2 = "22222222-2222-4222-8222-222222222222";
   const mk = (o) => ({ id: "rmNew", kind: "tictactoe", status: "lobby", host_id: U1, winner_id: null, max_players: 2, state: {}, me_seat: 0, in_room: true, my_answer: null, my_choice: null,
     players: [{ user_id: U1, seat: 0, score: 0, name: "Pop Mugisha", avatar_path: null }, { user_id: U2, seat: 1, score: 0, name: "Aline <b>U</b>", avatar_path: null }], ...o });
+  ok((await page.textContent(".wallet-bar")).includes("200") && (await page.$("[data-claim]")) !== null, "play: coin wallet and the daily claim button");
+  ok((await page.$$('[data-host="pot"]')).length === 4 && play.includes("pretend") && play.includes("Girlies & vibes") && play.includes("Penalty Kings") && play.includes("Street Race") && play.includes("Clash") && play.includes("Main Character") && play.includes("Hot Takes") && play.includes("Emoji Decode") && play.includes("Risk It"), "play: every game is listed, Risk It has four stake buttons, coins are called pretend");
+  ok((await page.textContent("#outlet")).includes("Rich list") && (await page.textContent("#outlet")).includes("340"), "play: rich list");
+  await page.click("[data-claim]");
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "claim_daily_coins")), "daily coins are claimed through the server");
+  await page.click('[data-host="pot"][data-stake="25"]');
+  await page.waitForSelector("[data-start]");
+  const potLobby = await page.textContent("[data-stage]");
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "create_room" && r[1].p_kind === "pot" && r[1].p_stake === 25)) && potLobby.includes("25 coins to play") && potLobby.includes("Pretend coins only"), "risk it: the stake is sent and the lobby explains the pot");
+  await page.evaluate(() => { location.hash = "/squad?tab=play&y=2"; });
+  await page.waitForSelector(".game-grid");
   await page.click('[data-host="tictactoe"]');
   await page.waitForSelector("[data-start]");
   ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "create_room" && r[1].p_kind === "tictactoe")) && (await page.isDisabled("[data-start]")), "hosting opens a lobby; Start waits for a second player");
@@ -518,13 +531,98 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await page.evaluate((r) => { window.__room = r; }, mk({ kind: "trivia", status: "playing", max_players: 12, state: { q: 0, total: 8, phase: "reveal", topic: "Rwanda", question: "Capital of Rwanda?", options: ["Huye", "Musanze", "Kigali", "Rubavu"], correct: 2, results: [{ user_id: U1, choice: 2, points: 142 }, { user_id: U2, choice: 0, points: 0 }], until: new Date(Date.now() + 4000).toISOString(), answered: [U1, U2] }, players: [{ user_id: U1, seat: 0, score: 142, name: "Pop Mugisha" }, { user_id: U2, seat: 1, score: 0, name: "Aline <b>U</b>" }] }));
   await page.waitForSelector(".opt.right", { timeout: 4000 });
   ok((await page.textContent("[data-stage]")).includes("+142 points"), "trivia: the reveal shows the right answer and your points");
+  const future = (ms) => new Date(Date.now() + ms).toISOString();
+  const set = (o) => page.evaluate((r) => { window.__room = r; }, mk(o));
+  // clash
+  await set({ kind: "clash", status: "playing", state: { round: 3, hp: [80, 55], heals: [1, 2], moved: [], last: { m: [3, 1], dmg: [5, 8], heal: [0, 0] } } });
+  await page.waitForSelector(".hp", { timeout: 4000 });
+  const cl = await page.textContent("[data-stage]");
+  ok(cl.includes("80 HP") && cl.includes("55 HP") && cl.includes("Round 3 of 12") && cl.includes("Strike beats Heavy") && (await page.$$(".clash-row .rps-btn:not([disabled])")).length === 4, "clash: health bars, round, and four moves");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-clash.png` });
+  await page.click('.clash-row [data-move="3"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 3)), "clash: picking a move sends it");
+  await set({ kind: "clash", status: "playing", my_choice: 3, state: { round: 4, hp: [80, 55], heals: [0, 2], moved: [0], last: null } });
+  await page.waitForSelector('.clash-row [data-move="4"][disabled]', { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("Locked in Guard") && (await page.$$(".clash-row .rps-btn:not([disabled])")).length === 0, "clash: picks lock, and heal is off once you've used both");
+  // penalty
+  await set({ kind: "penalty", status: "playing", state: { kick: 3, scores: [1, 0], moved: [], hist: [{ k: 0, s: 0, shot: 0, dive: 1, r: "goal" }, { k: 1, s: 1, shot: 2, dive: 2, r: "saved" }, { k: 2, s: 0, shot: 1, dive: 1, r: "saved" }] } });
+  await page.waitForSelector(".kicks", { timeout: 4000 });
+  const pen = await page.textContent("[data-stage]");
+  ok(pen.includes("You're in goal") && pen.includes("⚽") && pen.includes("🧤") && pen.includes("Saved!"), "penalty: you're the keeper on kick 4, with the kick history");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-penalty.png` });
+  await page.click('.rps-row [data-move="2"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 2)), "penalty: picking a corner sends it");
+  await set({ kind: "penalty", status: "playing", state: { kick: 10, scores: [3, 3], moved: [], hist: [] } });
+  await page.waitForFunction(() => document.querySelector("[data-stage]")?.textContent.includes("Sudden death"), null, { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("You're shooting"), "penalty: sudden death after level scores");
+  // street race
+  const three = [{ user_id: U1, seat: 0, score: 9, name: "Pop Mugisha" }, { user_id: U2, seat: 1, score: 3, name: "Aline <b>U</b>" }, { user_id: "33333333-3333-4333-8333-333333333333", seat: 2, score: 3, name: "Eric" }];
+  await set({ kind: "race", status: "playing", max_players: 10, players: three, state: { round: 2, goal: 30, pos: { "0": 9, "1": 3, "2": 3 }, used: { "0": true }, answered: [U2], phase: "pick", until: future(8000),
+    last: [{ seat: 0, gear: 3, delta: 9, crashed: false }, { seat: 1, gear: 2, delta: 0, crashed: true }, { seat: 2, gear: 1, delta: 3, crashed: false }] } });
+  await page.waitForSelector(".lane", { timeout: 4000 });
+  const race = await page.textContent("[data-stage]");
+  ok((await page.$$(".lane")).length === 3 && race.includes("9/30") && race.includes("used up") && race.includes("spun out") && (await page.$('.rps-btn[data-move="3"][disabled]')) !== null && (await page.$('.rps-btn[data-move="2"]:not([disabled])')) !== null, "street race: lanes for everyone, nitro is spent, last round explained");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-race.png` });
+  await page.click('.rps-btn[data-move="2"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 2)), "street race: picking a gear sends it");
+  // main character (most likely to)
+  await set({ kind: "likely", status: "playing", max_players: 12, players: three, state: { q: 0, total: 6, phase: "question", prompt: "Most likely to cry at a wedding", until: future(15000), answered: [U2] } });
+  await page.waitForSelector(".quiz-q", { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("Most likely to cry at a wedding") && (await page.$$(".opt[data-move]")).length === 3 && (await page.$$(".opt .n")).length === 0, "main character: the prompt, one button per squad member, votes hidden");
+  await page.click('.opt[data-move="1"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 1)), "main character: a vote sends the seat you picked");
+  await set({ kind: "likely", status: "playing", max_players: 12, players: three, my_answer: 1, state: { q: 0, total: 6, phase: "reveal", prompt: "Most likely to cry at a wedding", until: future(4000), answered: [U1, U2], top: 2,
+    votes: [{ seat: 0, user_id: U1, n: 1 }, { seat: 1, user_id: U2, n: 2 }, { seat: 2, user_id: "33333333-3333-4333-8333-333333333333", n: 0 }] } });
+  await page.waitForSelector(".opt.right", { timeout: 4000 });
+  ok((await page.textContent(".opt.right")).includes("👑") && (await page.textContent(".opt.right")).includes("2 votes"), "main character: the most-voted person gets the crown");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-likely.png` });
+  // hot takes
+  await set({ kind: "rather", status: "playing", max_players: 12, state: { q: 1, total: 6, phase: "question", prompt: "Would you rather ...", option_a: "Perfect hair", option_b: "Perfect skin", until: future(15000), answered: [] } });
+  await page.waitForSelector(".big-opt", { timeout: 4000 });
+  await page.click('.big-opt[data-move="1"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 1)), "hot takes: picking a side sends it");
+  await set({ kind: "rather", status: "playing", max_players: 12, my_answer: 0, state: { q: 1, total: 6, phase: "reveal", prompt: "Would you rather ...", option_a: "Perfect hair", option_b: "Perfect skin", until: future(4000), answered: [U1, U2], a: 2, b: 1, majority: 0 } });
+  await page.waitForFunction(() => document.querySelector(".big-opt.right"), null, { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("ran with the majority") && (await page.textContent(".big-opt.right")).includes("67%"), "hot takes: the split and the majority bonus");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-rather.png` });
+  // emoji decode shares the trivia board
+  await set({ kind: "emoji", status: "playing", max_players: 12, state: { q: 2, total: 8, phase: "question", topic: "Emoji", question: "Guess the movie: 🦁👑", options: ["The Lion King", "Madagascar", "Jumanji", "Zootopia"], until: future(12000), answered: [] } });
+  await page.waitForFunction(() => document.querySelector("[data-title]")?.textContent.includes("Emoji Decode"), null, { timeout: 4000 });
+  ok((await page.textContent("[data-title]")).includes("Emoji Decode") && (await page.textContent("[data-stage]")).includes("Guess the movie: 🦁👑"), "emoji decode: shows the emoji puzzle");
+  // risk it
+  await set({ kind: "pot", status: "playing", stake: 25, max_players: 10, my_dice: { d: [6, 6], rerolled: false, decided: false }, state: { phase: "roll", stake: 25, pot: 50, answered: [], until: future(15000) } });
+  await page.waitForSelector(".dice-big", { timeout: 4000 });
+  const pot = await page.textContent("[data-stage]");
+  ok(pot.includes("50") && pot.includes("Double six") && pot.includes("Hold") && pot.includes("Re-roll") && (await page.textContent(".dice-big")).includes("⚅"), "risk it: the pot, your dice (double six counts 13), hold or re-roll");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-pot.png` });
+  await page.click('[data-move="1"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 1 && r[1].p_room_id === "rmNew")), "risk it: re-roll is sent to the server");
+  await set({ kind: "pot", status: "playing", stake: 25, max_players: 10, my_dice: { d: [2, 3], rerolled: true, decided: true }, state: { phase: "roll", stake: 25, pot: 50, answered: [U1], until: future(15000) } });
+  await page.waitForFunction(() => document.querySelector("[data-stage]")?.textContent.includes("Locked in"), null, { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("re-rolled, final") && (await page.$("[data-move]")) === null, "risk it: after deciding there are no more buttons");
+  await set({ kind: "pot", status: "finished", winner_id: U1, stake: 25, max_players: 10, state: { phase: "done", stake: 25, pot: 50, winners: [U1], results: [{ user_id: U1, seat: 0, dice: [6, 6], rerolled: false, total: 13 }, { user_id: U2, seat: 1, dice: [3, 4], rerolled: true, total: 7 }] } });
+  await page.waitForSelector(".win-banner", { timeout: 4000 });
+  const potEnd = await page.textContent("[data-stage]");
+  ok(potEnd.includes("took the whole pot: 50 coins") && potEnd.includes("You won! Absolute W.") && potEnd.includes("re-rolled") && potEnd.includes("13"), "risk it: reveal shows everyone's dice and who took the pot");
+  await page.evaluate(() => { location.hash = "/squad?tab=play&room=rmNew&p=2"; });
+  await set({ kind: "pot", status: "finished", winner_id: null, stake: 25, max_players: 10, state: { phase: "done", stake: 25, pot: 50, winners: [U1, U2], results: [{ user_id: U1, seat: 0, dice: [3, 4], rerolled: false, total: 7 }, { user_id: U2, seat: 1, dice: [5, 2], rerolled: false, total: 7 }] } });
+  await page.evaluate(() => { location.hash = "/squad?tab=play&room=rmNew&p=3"; });
+  await page.waitForFunction(() => document.querySelector("[data-stage]")?.textContent.includes("Tie! Pot split"), null, { timeout: 4000 });
+  ok(true, "risk it: a tie splits the pot");
   await page.evaluate((r) => { window.__room = r; }, mk({ status: "finished", winner_id: U1, state: { board: "XXXOO....", turn: 0, line: [0, 1, 2] } }));
+  await page.evaluate(() => { location.hash = "/squad?tab=play&room=rmNew&w=1"; });
   await page.waitForSelector(".win-banner", { timeout: 4000 });
   ok((await page.textContent(".win-banner")).includes("You won!") && (await page.$("[data-again]")) !== null, "a win is celebrated and offers Play again");
   if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-win.png` });
   await page.evaluate((r) => { window.__room = r; }, mk({ status: "finished", winner_id: U2, state: { board: "OOOXX....", turn: 1, forfeit: U1 } }));
   await page.evaluate(() => { location.hash = "/squad?tab=play&room=rmNew&z=1"; });
-  await page.waitForFunction(() => document.querySelector(".win-banner")?.textContent.includes("won!") && !document.querySelector(".win-banner").textContent.includes("You won"), null, { timeout: 4000 });
+  await page.waitForFunction(() => document.querySelector(".win-banner")?.textContent.includes("Take the L"), null, { timeout: 4000 });
   ok((await page.textContent(".win-banner")).includes("You left the game") && !(await page.innerHTML(".win-banner")).includes("<b>U</b>"), "a loss and a forfeit are explained, names stay plain text");
   await page.evaluate(() => { window.__room = null; });
   await page.evaluate(() => { location.hash = "/squad?tab=play&room=gone"; });

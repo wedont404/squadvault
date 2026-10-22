@@ -194,6 +194,12 @@ This is the default way to collect. `config.onlinePayments` is `false`, so the I
 Unverified: the USSD shortcut formats. `*182*1*1*<number>*<amount>#` is the format supplied by the project owner; the merchant-code format `*182*8*1*<code>*<amount>#` and Airtel's `*500#` menu are not confirmed. Test them with a small amount on a real phone. If a shortcut fails, the page tells the member to dial `*182#` and enter the number manually.
 
 
+## Game night part 2 (update 013)
+
+Squad -> **Play** now has 11 games in four sections: **Battle & sport** (Clash duel, Penalty Kings shootout, Street Race for up to 10), **Girlies & vibes** (Main Character "most likely to", Hot Takes "would you rather", Emoji Decode), **Big brain** (Trivia Race, Tic-Tac-Toe, Connect 4, Rock Paper Scissors) and **High stakes** (Risk It, up to 10 players).
+**Risk It uses pretend squad coins, never real money.** Everyone starts with 200 coins per squad and can claim +50 once a day (Kigali time). Hosting picks a stake of 10, 25, 50 or 100; everyone puts that into the pot, the server rolls two dice for each player in secret, people may hold or re-roll once (final), the highest total takes the pot and a tie splits it. Leaving or closing a table before it starts returns the coins. Coins can't be bought, sold or cashed out, and no Mobile Money is involved. This is deliberate: taking real-money bets would normally need a gambling licence and puts members' real savings at risk.
+Run `supabase/SQUADVAULT_UPDATE_013.sql` once (needs 012 first). It adds the wallets, about 40 emoji / slang / football trivia questions and 38 "most likely to" / "would you rather" prompts. Add your own prompts with `insert into public.vibe_prompts (kind, prompt, option_a, option_b) values ('rather', 'Would you rather X or Y?', 'X', 'Y');` (use kind 'likely' and leave the options out for "most likely to").
+
 ## Live games (update 012)
 
 Squad -> **Play**: Tic-Tac-Toe, Connect 4, Rock-Paper-Scissors (first to 2) and a Trivia Race (2 to 12 players, 8 questions, faster correct answers score 100 to 150). Someone hosts a table, friends tap **Join**, the host taps **Start**. A squad leaderboard counts wins. No money is involved.

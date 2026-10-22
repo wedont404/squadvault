@@ -129,3 +129,21 @@ drop function if exists private.room_max_players(text);
 drop table if exists public.game_room_players;
 drop table if exists public.game_rooms;
 drop table if exists public.trivia_questions;
+
+-- 013 game night part 2 (this also removes 012's create_room/list_rooms/get_room replacements; run the 012 rollback block too if you want it all gone)
+drop function if exists public.create_room(uuid, text, integer);
+drop function if exists public.my_wallet(uuid);
+drop function if exists public.claim_daily_coins(uuid);
+drop function if exists private.room_tick(uuid);
+drop function if exists private.race_tick(uuid);
+drop function if exists private.vibe_tick(uuid);
+drop function if exists private.vibe_open(uuid, integer);
+drop function if exists private.pot_tick(uuid);
+drop function if exists private.pot_resolve(uuid);
+drop function if exists private.roll_die();
+drop function if exists private.dice_total(integer, integer);
+drop function if exists private.pot_refund(uuid);
+drop function if exists private.wallet_add(uuid, uuid, integer);
+drop function if exists private.room_min_players(text);
+drop table if exists public.vibe_prompts;
+drop table if exists public.squad_wallets;
