@@ -194,6 +194,13 @@ This is the default way to collect. `config.onlinePayments` is `false`, so the I
 Unverified: the USSD shortcut formats. `*182*1*1*<number>*<amount>#` is the format supplied by the project owner; the merchant-code format `*182*8*1*<code>*<amount>#` and Airtel's `*500#` menu are not confirmed. Test them with a small amount on a real phone. If a shortcut fails, the page tells the member to dial `*182#` and enter the number manually.
 
 
+## Live games (update 012)
+
+Squad -> **Play**: Tic-Tac-Toe, Connect 4, Rock-Paper-Scissors (first to 2) and a Trivia Race (2 to 12 players, 8 questions, faster correct answers score 100 to 150). Someone hosts a table, friends tap **Join**, the host taps **Start**. A squad leaderboard counts wins. No money is involved.
+The server is the referee: it checks whose turn it is, whether a square is free, and keeps hidden choices (a Rock-Paper-Scissors pick, a trivia answer) secret until everyone has played. Screens ask for fresh state every 1.5 seconds, so there is nothing extra to switch on in Supabase.
+Run `supabase/SQUADVAULT_UPDATE_012.sql` once. It adds the tables, the functions and about 45 starter trivia questions (Rwanda, Africa, general knowledge, money sense). Add your own with `insert into public.trivia_questions (topic, question, options, answer) values ('Rwanda', 'Question?', array['A','B','C','D'], 0);` where the last number is the right option (0 = first).
+The old polls and "guess the number" are now under the **Polls** tab.
+
 ## Confirm email later (update 011)
 
 Sign-up is instant: nobody waits for an email. Turn **Confirm email OFF** in Supabase (Authentication -> Sign In / Providers -> Email).

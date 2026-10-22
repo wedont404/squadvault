@@ -1,8 +1,9 @@
-// Squad hub: group chat, photo wall (with hearts) and games (polls + "guess the number").
+// Squad hub: group chat, photo wall (with hearts), live games (see play.js) and polls / "guess the number".
 // Reads go through RLS / read-only RPCs; every write is a SECURITY DEFINER RPC.
 import { state, activeGroup, isManagerRole } from "./state.js";
 import { fetchMessages, fetchPhotos, fetchGames, fetchEvents, fetchProfile } from "./data.js";
 import { sendVerifyEmail } from "./auth.js";
+import { mountPlay } from "./play.js";
 import { rpc, friendlyError } from "./supabase.js";
 import { navigate } from "./router.js";
 import { uploadGroupImage, removeGroupImage, PHOTO_TYPES } from "./media.js";
@@ -17,7 +18,7 @@ const verifyBanner = (what) => html`<div class="form-msg info" role="status" dat
   <div class="row wrap" style="gap:8px"><button class="btn sm primary" type="button" data-verify>${icon("send")} Send confirmation email</button>
     <button class="btn sm" type="button" data-verify-recheck>${icon("refresh")} I've confirmed it</button></div></div>`;
 
-const TABS = [["chat", "Chat", "chat"], ["photos", "Photos", "image"], ["games", "Games", "game"]];
+const TABS = [["chat", "Chat", "chat"], ["photos", "Photos", "image"], ["play", "Play", "game"], ["games", "Polls", "trophy"]];
 
 export async function renderHub({ outlet, query, isCurrent }) {
   const group = activeGroup();
@@ -26,14 +27,14 @@ export async function renderHub({ outlet, query, isCurrent }) {
     return;
   }
   const tab = TABS.some(([k]) => k === query.tab) ? query.tab : "chat";
-  mount(outlet, html`<div class="page-head"><div><h1>Squad</h1><p class="sub">Chat, photos and games for ${group.name}</p></div></div>
+  mount(outlet, html`<div class="page-head"><div><h1>Squad</h1><p class="sub">Chat, photos and live games for ${group.name}</p></div></div>
     <div class="tabs" role="tablist" aria-label="Squad sections">${TABS.map(([k, label, ic]) => html`<button class="tab" role="tab" type="button" aria-selected="${k === tab}" data-tab="${k}">${icon(ic)} ${label}</button>`)}</div>
     <div data-pane></div>`);
   on(outlet, "click", "[data-tab]", (_, b) => navigate(`/squad?tab=${b.dataset.tab}`));
   const pane = $("[data-pane]", outlet);
   // Chat and photos need a confirmed email. Fresh read each time, so confirming in another tab shows up here.
   let verified = true;
-  if (tab !== "games") {
+  if (tab === "chat" || tab === "photos") {
     try { verified = Boolean((await fetchProfile(state.user.id)).email_verified_at); } catch { verified = true; /* the database still enforces it */ }
   }
   on(outlet, "click", "[data-verify]", async (_, b) => {
@@ -47,6 +48,7 @@ export async function renderHub({ outlet, query, isCurrent }) {
   on(outlet, "click", "[data-verify-recheck]", () => navigate(`/squad?tab=${tab}&t=${Date.now()}`));
   if (tab === "chat") await mountChat(pane, group, isCurrent, verified);
   else if (tab === "photos") await mountPhotos(pane, group, isCurrent, verified);
+  else if (tab === "play") await mountPlay(pane, group, isCurrent, query.room);
   else await mountGames(pane, group, isCurrent);
 }
 

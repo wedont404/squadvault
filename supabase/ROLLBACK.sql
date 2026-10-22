@@ -110,3 +110,22 @@ drop trigger if exists squadvault_verified_chat on public.group_messages;
 drop trigger if exists squadvault_verified_photos on public.group_photos;
 drop function if exists private.require_verified_email();
 drop function if exists public.confirm_my_email();
+
+-- 012 multiplayer games
+drop function if exists public.create_room(uuid, text);
+drop function if exists public.join_room(uuid);
+drop function if exists public.leave_room(uuid);
+drop function if exists public.start_room(uuid);
+drop function if exists public.delete_room(uuid);
+drop function if exists public.make_move(uuid, integer);
+drop function if exists public.get_room(uuid);
+drop function if exists public.list_rooms(uuid);
+drop function if exists private.trivia_tick(uuid);
+drop function if exists private.trivia_open(uuid, integer);
+drop function if exists private.room_finish(uuid, uuid, jsonb);
+drop function if exists private.c4_line(text, text);
+drop function if exists private.ttt_line(text, text);
+drop function if exists private.room_max_players(text);
+drop table if exists public.game_room_players;
+drop table if exists public.game_rooms;
+drop table if exists public.trivia_questions;

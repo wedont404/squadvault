@@ -1,6 +1,6 @@
 // Service worker: fast repeat loads and offline fallback. App files are network-first; the pinned CDN library is cache-first. Supabase API/auth/storage calls are NEVER
 // cached or intercepted, so money data is always live.
-const CACHE = "squadvault-v8";
+const CACHE = "squadvault-v10";
 const CDN = "https://cdn.jsdelivr.net/";
 
 self.addEventListener("install", () => self.skipWaiting());

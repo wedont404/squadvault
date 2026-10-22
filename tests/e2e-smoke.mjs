@@ -96,6 +96,10 @@ export function createClient(){
         {id:'gm1',kind:'poll',title:'Where do we celebrate?',options:['Kigali','Musanze'],status:'open',answer:null,created_by:U2,created_at:iso(2),entries:3,my_choice:null,my_guess:null,counts:[2,1],top:null},
         {id:'gm2',kind:'guess',title:'How much by Friday?',options:null,status:'open',answer:null,created_by:U1,created_at:iso(1),entries:2,my_choice:null,my_guess:480000,counts:null,top:null},
         {id:'gm3',kind:'guess',title:'Guests who come?',options:null,status:'closed',answer:120,created_by:U2,created_at:iso(30),entries:2,my_choice:null,my_guess:100,counts:null,top:[{user_id:U2,guess:118,diff:2},{user_id:U1,guess:100,diff:20}]}],error:null};
+      if(name==='list_rooms') return {data:{rooms:[{id:'rm1',kind:'trivia',status:'lobby',host_id:U2,winner_id:null,created_at:iso(1),max_players:12,abandoned:false,in_room:false,players:[{user_id:U2,seat:0,score:0,name:'Aline <b>U</b>'}]}],leaderboard:[{user_id:U2,name:'Aline U',wins:3,played:5},{user_id:U1,name:'Pop Mugisha',wins:1,played:2}]},error:null};
+      if(name==='create_room') { window.__room={id:'rmNew',kind:args.p_kind,status:'lobby',host_id:U1,winner_id:null,max_players:2,state:{},me_seat:0,in_room:true,my_answer:null,my_choice:null,players:[{user_id:U1,seat:0,score:0,name:'Pop Mugisha',avatar_path:null}]}; return {data:'rmNew',error:null}; }
+      if(name==='get_room') return window.__room ? {data:{...window.__room,server_now:new Date().toISOString()},error:null} : {data:null,error:{message:'not_allowed',code:'42501'}};
+      if(['make_move','start_room','join_room','leave_room','delete_room'].includes(name)) return {data:null,error:null};
       if(name==='add_group_photo') return {data:'p-new',error:null};
       if(name==='plan_overview') { const free=!!window.__free; return {data:{plan:free?'free':'plus',plan_name:free?'Free':'Plus',booked_plan:free?'free':'plus',until:free?null:new Date(now+20*864e5).toISOString(),expired:false,
         limits:{members:free?15:150,events:free?2:null,photos:free?30:500,auto_check:!free},usage:{members:2,events:1,photos:1},is_admin:true,pending:window.__pend||null,last_rejected:null,
@@ -465,6 +469,68 @@ const shot = async (page, name) => { if (process.env.SHOTS) await page.screensho
   await page.click('.dialog button[type="submit"]');
   await page.waitForTimeout(250);
   ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "close_game" && r[1].p_answer === 500000)), "revealing a guess game sends the real answer");
+
+
+  // live games: lobby, boards, hidden answers, win screen
+  await page.evaluate(() => { location.hash = "/squad?tab=play&y=1"; });
+  await page.waitForSelector(".game-grid");
+  const play = await page.textContent("#outlet");
+  ok(["Tic-Tac-Toe", "Connect 4", "Rock Paper Scissors", "Trivia Race"].every((n) => play.includes(n)), "play: all four games can be hosted");
+  ok(play.includes("Open tables") && play.includes("Aline <b>U</b>") && (await page.$('[data-join="rm1"]')) !== null, "play: an open table shows with a Join button, names as plain text");
+  ok(play.includes("Squad leaderboard") && play.includes("Aline U"), "play: leaderboard is shown");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-lobby.png` });
+  const U1 = "11111111-1111-4111-8111-111111111111", U2 = "22222222-2222-4222-8222-222222222222";
+  const mk = (o) => ({ id: "rmNew", kind: "tictactoe", status: "lobby", host_id: U1, winner_id: null, max_players: 2, state: {}, me_seat: 0, in_room: true, my_answer: null, my_choice: null,
+    players: [{ user_id: U1, seat: 0, score: 0, name: "Pop Mugisha", avatar_path: null }, { user_id: U2, seat: 1, score: 0, name: "Aline <b>U</b>", avatar_path: null }], ...o });
+  await page.click('[data-host="tictactoe"]');
+  await page.waitForSelector("[data-start]");
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "create_room" && r[1].p_kind === "tictactoe")) && (await page.isDisabled("[data-start]")), "hosting opens a lobby; Start waits for a second player");
+  await page.evaluate((r) => { window.__room = r; }, mk({ status: "playing", state: { board: ".........", turn: 0 } }));
+  await page.waitForSelector(".ttt .cell:not([disabled])", { timeout: 4000 });
+  ok(((await page.textContent("[data-stage]")).includes("Your turn")), "tic-tac-toe: it says when it is your turn");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-ttt.png` });
+  await page.click('.ttt [data-move="4"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 4 && r[1].p_room_id === "rmNew")), "tic-tac-toe: tapping a square sends the move");
+  await page.evaluate((r) => { window.__room = r; }, mk({ status: "playing", state: { board: "....X....", turn: 1 } }));
+  await page.waitForFunction(() => document.querySelectorAll(".ttt .cell:not([disabled])").length === 0, null, { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("Waiting for Aline <b>U</b>"), "tic-tac-toe: squares lock while it is the other player's turn");
+  await page.evaluate((r) => { window.__room = r; }, mk({ kind: "connect4", status: "playing", state: { board: ".".repeat(42), turn: 0 } }));
+  await page.waitForSelector(".c4col:not([disabled])", { timeout: 4000 });
+  ok((await page.$$(".c4col")).length === 7 && (await page.$$(".disc")).length === 42, "connect 4: seven columns, forty-two discs");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-c4.png` });
+  await page.click('.c4col[data-move="3"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 3)), "connect 4: tapping a column drops a disc there");
+  await page.evaluate((r) => { window.__room = r; }, mk({ kind: "rps", status: "playing", my_choice: 2, state: { round: 2, wins: [1, 0], target: 2, moved: [0], last: { c: [1, 3], result: 0 } } }));
+  await page.waitForSelector(".rps-row", { timeout: 4000 });
+  const rps = await page.textContent("[data-stage]");
+  ok(rps.includes("You picked Paper") && rps.includes("You won that round") && (await page.$$(".rps-btn:not([disabled])")).length === 0, "rock-paper-scissors: your hidden pick is locked and the last round is explained");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-rps.png` });
+  await page.evaluate((r) => { window.__room = r; }, mk({ kind: "trivia", status: "playing", max_players: 12, state: { q: 0, total: 8, phase: "question", topic: "Rwanda", question: "Capital of Rwanda?", options: ["Huye", "Musanze", "Kigali", "Rubavu"], until: new Date(Date.now() + 12000).toISOString(), answered: [U2] } }));
+  await page.waitForSelector(".quiz-q", { timeout: 4000 });
+  const tq = await page.textContent("[data-stage]");
+  ok(tq.includes("Question 1 of 8") && tq.includes("1 of 2 answered") && (await page.$$(".opt.right")).length === 0, "trivia: question, answer count and no hint about the right answer");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-trivia.png` });
+  await page.click('.opt[data-move="2"]');
+  await page.waitForTimeout(250);
+  ok(await page.evaluate(() => window.__rpc.some((r) => r[0] === "make_move" && r[1].p_move === 2)), "trivia: tapping an option sends the answer");
+  await page.evaluate((r) => { window.__room = r; }, mk({ kind: "trivia", status: "playing", max_players: 12, state: { q: 0, total: 8, phase: "reveal", topic: "Rwanda", question: "Capital of Rwanda?", options: ["Huye", "Musanze", "Kigali", "Rubavu"], correct: 2, results: [{ user_id: U1, choice: 2, points: 142 }, { user_id: U2, choice: 0, points: 0 }], until: new Date(Date.now() + 4000).toISOString(), answered: [U1, U2] }, players: [{ user_id: U1, seat: 0, score: 142, name: "Pop Mugisha" }, { user_id: U2, seat: 1, score: 0, name: "Aline <b>U</b>" }] }));
+  await page.waitForSelector(".opt.right", { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("+142 points"), "trivia: the reveal shows the right answer and your points");
+  await page.evaluate((r) => { window.__room = r; }, mk({ status: "finished", winner_id: U1, state: { board: "XXXOO....", turn: 0, line: [0, 1, 2] } }));
+  await page.waitForSelector(".win-banner", { timeout: 4000 });
+  ok((await page.textContent(".win-banner")).includes("You won!") && (await page.$("[data-again]")) !== null, "a win is celebrated and offers Play again");
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/play-win.png` });
+  await page.evaluate((r) => { window.__room = r; }, mk({ status: "finished", winner_id: U2, state: { board: "OOOXX....", turn: 1, forfeit: U1 } }));
+  await page.evaluate(() => { location.hash = "/squad?tab=play&room=rmNew&z=1"; });
+  await page.waitForFunction(() => document.querySelector(".win-banner")?.textContent.includes("won!") && !document.querySelector(".win-banner").textContent.includes("You won"), null, { timeout: 4000 });
+  ok((await page.textContent(".win-banner")).includes("You left the game") && !(await page.innerHTML(".win-banner")).includes("<b>U</b>"), "a loss and a forfeit are explained, names stay plain text");
+  await page.evaluate(() => { window.__room = null; });
+  await page.evaluate(() => { location.hash = "/squad?tab=play&room=gone"; });
+  await page.waitForSelector("[data-stage] .empty", { timeout: 4000 });
+  ok((await page.textContent("[data-stage]")).includes("isn't available any more"), "a closed table shows a friendly message");
+  errors.length = 0; // the deliberate not_allowed above is logged by the client on purpose
 
   // cancelled event: the page automatically offers to return the money
   await page.evaluate((p) => { location.hash = p; }, `/events/${E3}`);
